@@ -45,6 +45,15 @@ public interface Runtimes {
                 .registerSystemExtension(ServiceExtension.class, new VaultSeedExtension(Map.of("client_secret_alias", "client_secret")));
     }
 
+    /**
+     * Wie {@link #dcpRuntime}, aber mit dem dedizierten Runtime-Modul, das die Wind-X-Mediator-
+     * Data-Plane-Extension via ServiceLoader im Runtime-Classloader laedt.
+     */
+    static RuntimeExtension dcpRuntimeWithMediator(String name, KeyPair keyPair, Supplier<Config> configurationProvider) {
+        return genericRuntime(name, ":edc-tests:runtime:dcp:runtime-memory-dcp-ih-windx", keyPair, configurationProvider)
+                .registerSystemExtension(ServiceExtension.class, new VaultSeedExtension(Map.of("client_secret_alias", "client_secret")));
+    }
+
     static RuntimeExtension stsRuntime(String name, KeyPair keyPair, Supplier<Config> configurationProvider) {
         return new RuntimePerClassExtension(new EmbeddedRuntime(name, ":edc-tests:runtime:dcp:runtime-memory-sts").configurationProvider(configurationProvider)
                 .registerSystemExtension(ServiceExtension.class, new VaultSeedExtension(Map.of("client_secret_alias", "client_secret"))))

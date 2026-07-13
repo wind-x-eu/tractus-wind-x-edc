@@ -122,3 +122,9 @@ edc-tests/miw-tests/src/test/resources/docker-environment/postgres_data/
 # Allure Results
 
 **/allure-results/*
+
+# Eclipse / Buildship (Wind-X fork)
+.classpath
+.project
+.settings/
+bin/

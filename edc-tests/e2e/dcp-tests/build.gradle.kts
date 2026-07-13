@@ -50,6 +50,10 @@ dependencies {
     testCompileOnly(project(":edc-tests:runtime:dcp:runtime-memory-dcp-div-ih"))
     testCompileOnly(project(":edc-tests:runtime:dcp:runtime-memory-dcp-ih"))
     testCompileOnly(project(":edc-tests:runtime:dcp:runtime-memory-sts"))
+
+    // windx: dediziertes Runtime-Modul (dcp-ih + windx-mediator-proxy); die Extension wird so im
+    // Runtime-Classloader via ServiceLoader geladen, nicht aus dem Test-Classpath (sonst SPI-Doppelung).
+    testCompileOnly(project(":edc-tests:runtime:dcp:runtime-memory-dcp-ih-windx"))
 }
 
 // do not publish
