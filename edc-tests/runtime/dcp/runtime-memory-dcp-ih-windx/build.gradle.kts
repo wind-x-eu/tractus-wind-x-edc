@@ -23,8 +23,13 @@ plugins {
 }
 
 dependencies {
-    // identisch zum Standard-DCP-IH-Runtime ...
-    implementation(project(":edc-tests:runtime:dcp:runtime-memory-dcp-ih"))
+    // identisch zum Standard-DCP-IH-Runtime, aber ohne bdrs-client: dessen beide @Provider (BdrsClient und
+    // AudienceResolver) stellt windx-bdrs-static bereit. Beide Module gleichzeitig wuerden die Provider doppeln.
+    // Gleiche Verdrahtung wie in der Produktions-Runtime edc-runtime-windx.
+    implementation(project(":edc-tests:runtime:dcp:runtime-memory-dcp-ih")) {
+        exclude("org.eclipse.tractusx.edc", "bdrs-client")
+    }
+    implementation(project(":edc-extensions:windx:windx-bdrs-static"))
     // ... plus die Wind-X-Mediator-Data-Plane-Extension, damit sie im Runtime-Classloader
     //     via ServiceLoader geladen wird (statt aus dem Test-Classpath, was die Data-Plane-SPI
     //     doppeln und die Injection brechen wuerde).

@@ -7,6 +7,53 @@
 
 ---
 
+## 0. Status-Update — in der VM abgearbeitet (2026-07-14)
+
+**AP0–AP2 sind abgeschlossen.** Alle drei offenen Prüfschritte aus Abschnitt 3 sind in der Debian-VM gelaufen:
+
+| Schritt | Ergebnis |
+|---|---|
+| 3.1 `MediatorConsumerPullTest` (Regressionsanker) | **5/5 grün** — die Suite läuft in der VM. Der DI-Boot-Fehler war, wie vermutet, ein reines Windows-Problem. |
+| 3.2 Unit-Tests `edc-runtime-windx` + `windx-bdrs-static` | **20/20 grün** (5 + 11 + 4, keine Skips) |
+| 3.3 In-Process-DCP-Beweis für `windx-bdrs-static` | **erbracht — 5/5 grün mit der echten Extension auf dem Provider** |
+
+**Zu 3.3 — umgesetzt wurde Variante B, nicht Variante A. Variante A ist eine Falle:**
+
+> `EmbeddedRuntime.boot()` baut den Runtime-Classloader als `URLClassLoader.newInstance(classPathEntries)`
+> **ohne expliziten Parent** — Parent ist damit der App-/Test-Classloader. Javas `ServiceLoader` findet über die
+> Parent-Delegation folglich **auch die `META-INF/services`-Dateien des Test-Classpaths**. Ein
+> `testImplementation(project(":edc-extensions:windx:windx-bdrs-static"))` hätte `WindxStaticBdrsExtension`
+> daher in **jede** Runtime des Test-JVMs gezogen — auch in Consumer und STS, die `bdrs-client` noch enthalten.
+> Dort hätten dann zwei Module denselben `BdrsClient` **und** denselben `AudienceResolver` als `@Provider`
+> angeboten. Das failt nicht hart (Setting ist `required = false`), sondern registriert still um — im schlechten
+> Fall gewinnt unsere Extension mit **leerer** Mapping-Config und der Fehler zeigt sich erst als kryptischer
+> Token-Fehler bei der Negotiation. Genau das ist die „SPI-Doppelung", vor der
+> `edc-tests/e2e/dcp-tests/build.gradle.kts:54` warnt — und dasselbe Fehlermuster wie beim Vault (siehe AP1).
+
+Variante B umgeht das, weil das Modul nur im **Runtime-Classloader des Providers** landet:
+
+- `edc-tests/runtime/dcp/runtime-memory-dcp-ih-windx/build.gradle.kts`: `bdrs-client` aus dem
+  `runtime-memory-dcp-ih`-Dependency ausgeschlossen, `windx-bdrs-static` aufgenommen — **gleiche Verdrahtung
+  wie die Produktions-Runtime `edc-runtime-windx`**.
+- `MediatorConsumerPullTest`: `registerServiceMock(BdrsClient.class, …)` beim **Provider** entfernt; die
+  Mappings kommen aus `tx.edc.windx.bdrs.mappings`. `tx.edc.iam.dcp.bdrs.server.url` wird für den Provider
+  **nicht mehr gesetzt** — dass er ohne dieses Pflicht-Setting bootet, ist Teil der Aussage.
+- Der **Consumer** behält den `MockBdrsClient` (seine Runtime `runtime-memory-dcp-ih` ist ein geteiltes
+  Upstream-Modul — unangetastet).
+
+Tragfähig ist das, weil auf dem Test-Classpath nur `:spi:bdrs-client-spi` liegt (das reine Interface, geteilt und
+harmlos), **nicht** das Impl-Modul `bdrs-client` — das `exclude` wird also nicht durch die Parent-Delegation
+unterlaufen. Verifiziert mit `:edc-tests:e2e:dcp-tests:dependencies --configuration testRuntimeClasspath`.
+
+**Beleg im Boot-Log:** `[PROVIDER] Wind-X Static BDRS Extension: 2 BPN/DID mapping(s) configured`, beim Provider
+**0×** `BPN/DID Resolution Service Client Extension` (nur beim Consumer), **keine** `already registered`-Warnung
+für `BdrsClient`/`AudienceResolver`.
+
+**Nächster Schritt:** AP3 (Abschnitt 3.4). ⚠️ **Docker ist in der VM aktuell nicht verfügbar** (`docker info`
+schlägt fehl) — das `dockerize`-Target braucht es.
+
+---
+
 ## 1. Warum diese Übergabe existiert
 
 Die gesamte windx-Entwicklung (Commit `f80f7b11`) entstand in der **Debian-VM**
@@ -176,7 +223,8 @@ java -Dedc.fs.config=<config> -jar edc-controlplane/edc-runtime-windx/build/libs
 
 | Punkt | Status |
 |---|---|
-| In-Process-DCP-Beweis für `windx-bdrs-static` (3.3) | **offen** — der einzige echte Rest von AP2 |
-| Regressionsanker `MediatorConsumerPullTest` 5/5 | **nie gemessen** (Windows). Die „5 Tests" stammen aus der Commit-Message, das „grün" aus den Phasendokumenten |
+| In-Process-DCP-Beweis für `windx-bdrs-static` (3.3) | **erledigt** 2026-07-14 (Variante B, 5/5 grün) — siehe Abschnitt 0 |
+| Regressionsanker `MediatorConsumerPullTest` 5/5 | **gemessen und grün** in der VM (vorher/nachher) |
+| Docker in der VM | **nicht verfügbar** — blockiert AP3 (`dockerize`). Vor AP3 klären. |
 | VC-Format (`cx-dcp`/`cx-policy` erwarten evtl. BPN-Claims) | unverändert das **größte Risiko** des Gesamtplans — schlägt erst in AP6 (Katalogabfrage) zu |
 | `windx-dev.properties` enthält noch `tx.edc.iam.dcp.bdrs.server.url` | harmloses Überbleibsel; kann bei AP4 raus |
