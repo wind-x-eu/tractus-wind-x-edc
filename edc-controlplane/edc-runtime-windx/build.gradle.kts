@@ -24,7 +24,11 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":edc-controlplane:edc-controlplane-base"))
+    // bdrs-client wird durch windx-bdrs-static ersetzt (statische BPN/DID-Abbildung statt BDRS-Server).
+    // Das Original liefert ZWEI @Provider -- BdrsClient und AudienceResolver -- die sonst kollidieren wuerden.
+    implementation(project(":edc-controlplane:edc-controlplane-base")) {
+        exclude("org.eclipse.tractusx.edc", "bdrs-client")
+    }
     implementation(project(":edc-dataplane:edc-dataplane-base")) {
         exclude("org.eclipse.edc", "data-plane-selector-client")
     }
@@ -38,6 +42,8 @@ dependencies {
     implementation(project(":edc-extensions:windx:windx-participant-log"))
     implementation(project(":edc-extensions:windx:windx-mediator-proxy"))
     implementation(project(":edc-extensions:windx:windx-mms"))
+    // Ersatz fuer das ausgeschlossene bdrs-client: BdrsClient + AudienceResolver aus statischer Config
+    implementation(project(":edc-extensions:windx:windx-bdrs-static"))
     // Ersetzt die Standard-PipelineService durch die non-finite-faehige Variante (kontinuierlicher Mms-PUSH,
     // Source-Property edc:isNonFinite=true). Nicht-default @Provider ueberschreibt den isDefault-Standard.
     implementation(project(":edc-extensions:non-finite-provider-push:non-finite-provider-push-core"))
