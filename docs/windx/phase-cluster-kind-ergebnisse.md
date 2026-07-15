@@ -1,10 +1,11 @@
-# KinD-Cluster-Deployment — Ergebnisse & offene Blocker
+# KinD-Cluster-Deployment — Ergebnisse (Weg C: DID-Identität)
 
 **Datum:** 2026-07-15
 **Scope:** `edc-runtime-windx` als Provider + Consumer im lokalen **KinD** (`kind-mvd`, Namespace `windx`)
 betreiben — eigener windx-Stack neben dem unangetasteten MVD.
-**Status:** Stack läuft, DCP-Kette bis kurz vor dem Ziel. **Katalogabfrage noch nicht grün** — aber aus einem
-**anderen** Grund als zuvor: der Scope-Namensraum-Fix ist verifiziert, dahinter liegen zwei neue Blocker.
+**Status:** ✅ **Katalog + Contract-Negotiation grün** (`FINALIZED`), rein **DID-basiert über DSP 2025**.
+Offen: nur noch der eigentliche Daten-Byte-Transfer (Stufe 4, braucht echte EC-Keys). Verlauf: Scope-Fix
+(`cx-dcp`) → BPN-vs-DID-Befund → Entscheidung DID/DSP-2025 → verifiziert bis Vertragsabschluss.
 
 ---
 
@@ -78,34 +79,77 @@ kubectl -n windx rollout restart deploy/windx-provider deploy/windx-consumer
 
 ---
 
-## 4. Offener Blocker (nächste Untersuchung)
+## 4. Nach dem Scope-Fix: der BPN-vs-DID-Befund (untersucht & gelöst)
 
-Katalogabfrage weiterhin **HTTP 401 / 502**, aber die Ursache liegt jetzt **hinter** dem Scope-Problem. Zwei
-neue Meldungen im Provider-DEBUG-Log bei jedem Request:
+Nach dem `cx-dcp`-Fix blieb die Katalogabfrage **401** — aber aus neuem Grund. DEBUG-Trace des Providers:
 
 ```
-WARNING [BpnExtractionFunction] Required credential type 'MembershipCredential' not present in ClaimToken,
-        cannot extract property 'holderIdentifier'
+SEVERE  BpnExtractionFunction: Required credential type 'MembershipCredential' not present in ClaimToken,
+        cannot extract property 'holderIdentifier'   (in ProtocolTokenValidatorImpl.verify)
 DEBUG   Unauthorized: The JWT id '…' was already used.
 DEBUG   DSP: Service call failed: Unauthorized
 ```
 
-- **MembershipCredential fehlt in der Presentation:** die vom Consumer zurückgegebene VP enthält kein
-  MembershipCredential. Zu klären: ob der Setup-Job es tatsächlich im (plain-EDC-)IdentityHub ablegt, ob der
-  Credential-Typ/Namensraum zur Query passt, und ob `bpn-validation`/`agreements-bpns` (Tractus-X) hier andere
-  Annahmen als der plain-EDC-IdentityHub treffen.
-- **JWT id already used:** die JTI ist pro Request **verschieden**, „already used" tritt also **innerhalb eines
-  Flows** auf (kein Cache-Artefakt) → der Provider validiert dasselbe Token doppelt. Kandidat:
-  JTI-Replay-Schutz vs. Presentation-Flow. Am IH war beim Boot vermerkt:
-  `JWT Token ID validation is not active … edc.iam.accesstoken.jti.validation=true`.
+**Kausalität (belegt):** `BpnExtractionFunction` läuft **innerhalb der Token-Validierung** und verlangt eine
+BPN im `holderIdentifier`-Claim des MembershipCredentials. Sie scheitert → verbraucht dabei die JTI → der
+Retry stolpert über „JWT id already used". Also: **Credential = Wurzel, JTI = Folge.**
 
-Beides ist DCP-internes Terrain und eine **eigene** Untersuchung — bewusst nicht Teil dieses Schritts
-(Scope war: Scope-Fix verifizieren).
+**Warum das Credential nicht passt:** Der Setup-Job (plain-EDC) signiert ein MembershipCredential mit
+`credentialSubject = {id, memberOf}` — **ohne** `holderIdentifier`. Der Namensraum ist **nicht** das Problem
+(`CredentialTypePredicate` matcht schon beim nackten Typ-String). Es fehlt allein die BPN.
+
+**Warum nur DSP 0.8:** `BpnExtractionFunction` ist **ausschließlich** für DSP 0.8 registriert
+(`cx-dataspace-protocol`). Für DSP **2025** registriert der EDC-Core einen `DefaultDcpParticipantIdExtractionFunction`
+— **ohne** BPN-Zwang.
+
+**Der IdentityHub ist DID-nativ:** im `fma-IdentityHub`-Code **0** BPN-Treffer (vs. 190 DID); die Participants
+tragen `participantContextId` + `did`, **kein** BPN-Feld. Der BPN ist reine Connector-/Catena-X-Schicht
+(`tractusx.edc.participant.bpn`, `windx-bdrs-static`, `BpnExtractionFunction`). Deshalb ist **DID die natürliche
+Identität** dieses Datenraums.
 
 ---
 
-## 5. Fazit
+## 5. Lösung: Weg C — DID-Identität über DSP 2025 (verifiziert grün)
 
-Der `cx-dcp`-Ausschluss war die richtige und **verifizierte** Korrektur für den Scope-Namensraum-Konflikt.
-Der Stack ist betriebsbereit bis unmittelbar vor die erfolgreiche Credential-Prüfung. Offen: MembershipCredential
-in der VP + JTI-Replay — der nächste, klar abgegrenzte Untersuchungsschritt.
+**Entscheidung:** Wind-X ist ein eigenständiger Datenraum ohne Catena-X-Anbindung → **DID statt BPN**.
+Umgesetzt durch Nutzung von **DSP 2025** (`dataspace-protocol-http:2025-1`, Pfad `…/protocol/2025-1`).
+
+**Was Weg C braucht — am Connector nichts.** Der komplette 2025-Stack (`dspcatalog2025`, `dspnegotiation2025`,
+`dsptransferprocess2025` je mit HTTP-API) ist im Classpath. Nötig sind nur:
+1. **Permissive Policy** am Provider (leere `permission`/`prohibition`/`obligation`) — **keine** BPN/Membership-
+   Constraints, sonst bräuchte man wieder Credentials.
+2. DSP-2025-Protokoll-String + `/protocol/2025-1`-Pfad in jedem Management-Request.
+
+**Verifiziert (2026-07-15), rein DID-basiert, kein BPN, kein Credential-Umbau:**
+
+| Stufe | Ergebnis |
+|---|---|
+| Asset + permissive Policy + ContractDefinition seeden | 3× HTTP 200 |
+| Katalog (DSP 2025) | HTTP 200 mit Dataset `windx-asset-1` + Offer; beworbene Distributionen inkl. **`Mms-PULL`, `MediatorHttpData-PULL`, `MmsLight-PULL`, `HttpData-PUSH`** (unsere windx-Extensions sind im Cluster live) |
+| Contract-Negotiation (DSP 2025) | **`REQUESTED → AGREED → FINALIZED`**, `contractAgreementId` ausgestellt, `counterPartyId: did:web:windx-identityhub:provider` |
+
+Damit trägt die **gesamte** Identitäts- und Vertragskette DID-basiert: AP1-Vault → AP2-BDRS → cx-dcp-Scope-Fix →
+DSP-2025-Default-Extraction → Agreement. **Weg A (Credential mit `holderIdentifier` anreichern + Image-Rebuild)
+ist damit nicht nötig.**
+
+**Reproduktion:** `kubernetes/windx/windx-seed.sh` (seedet + Katalog + Negotiation bis FINALIZED, extrahiert die
+Offer-ID dynamisch). Ausführung im Skriptkopf dokumentiert.
+
+---
+
+## 6. Offen: Stufe 4 — echter Datentransfer
+
+Nur der Byte-Transfer steht aus (`POST /edrs` → EDR → Daten ziehen). Er braucht ein **echtes EC-Schlüsselpaar**
+für `signer-private`/`verifier-public` (aktuell Dummies in `tx.edc.vault.secrets`) — plus die Feinheit, dass das
+Seed-Format an `;`/`:` splittet, ein PEM/JWK also sauber reinpassen muss. Katalog + Negotiation brauchen die Keys
+**nicht** (deshalb bereits grün). Nebenbei: schon der bibas-Stack hat diese Keys nie geseedet (Transfers liefen
+dort über den MMS-Light-EDR-Pfad) — also ohnehin Neuland.
+
+---
+
+## 7. Fazit
+
+Zwei windx-Connectoren verhandeln im KinD-Cluster einen **echten Vertrag über DCP** — DID-basiert, DSP 2025, mit
+eigenem IdentityHub. Der Scope-Namensraum-Konflikt (`cx-dcp`) und die BPN-Erwartung (DSP 0.8) sind verstanden und
+gelöst; der Weg (DID/2025) ist verifiziert grün bis `FINALIZED`. Offen bleibt allein der Daten-Byte-Transfer
+(Stufe 4, echte EC-Keys).
