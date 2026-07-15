@@ -26,8 +26,14 @@ plugins {
 dependencies {
     // bdrs-client wird durch windx-bdrs-static ersetzt (statische BPN/DID-Abbildung statt BDRS-Server).
     // Das Original liefert ZWEI @Provider -- BdrsClient und AudienceResolver -- die sonst kollidieren wuerden.
+    // cx-dcp raus: es verdrahtet den Credential-Scope-Namensraum fest auf 'org.eclipse.tractusx.vc.type'
+    // (Catena-X, TxDcpConstants). Unser plain-EDC-fma-IdentityHub akzeptiert nur 'org.eclipse.dspace.dcp.vc.type'.
+    // Ohne cx-dcp liefert tx-dcp den Default-Scope aus der Config (tx.edc.iam.dcp.default-scopes.*) im
+    // DSPACE-Namensraum. Trade-off: der constraint-basierte CxCredentialScopeExtractor entfaellt -- nur
+    // relevant bei Policies mit Credential-Constraints (hier permissiv). Kein anderer Code importiert cx-dcp.
     implementation(project(":edc-controlplane:edc-controlplane-base")) {
         exclude("org.eclipse.tractusx.edc", "bdrs-client")
+        exclude("org.eclipse.tractusx.edc", "cx-dcp")
     }
     implementation(project(":edc-dataplane:edc-dataplane-base")) {
         exclude("org.eclipse.edc", "data-plane-selector-client")
