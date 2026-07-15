@@ -3,9 +3,9 @@
 **Datum:** 2026-07-15
 **Scope:** `edc-runtime-windx` als Provider + Consumer im lokalen **KinD** (`kind-mvd`, Namespace `windx`)
 betreiben — eigener windx-Stack neben dem unangetasteten MVD.
-**Status:** ✅ **Katalog + Contract-Negotiation grün** (`FINALIZED`), rein **DID-basiert über DSP 2025**.
-Offen: nur noch der eigentliche Daten-Byte-Transfer (Stufe 4, braucht echte EC-Keys). Verlauf: Scope-Fix
-(`cx-dcp`) → BPN-vs-DID-Befund → Entscheidung DID/DSP-2025 → verifiziert bis Vertragsabschluss.
+**Status:** ✅ **Vollständig grün** — Katalog, Negotiation (`FINALIZED`) **und Datentransfer** (HTTP 200 mit Token,
+401 ohne), rein **DID-basiert über DSP 2025**. Verlauf: Scope-Fix (`cx-dcp`) → BPN-vs-DID-Befund → Entscheidung
+DID/DSP-2025 → Vertrag → EDR-Token (echte EC-Keys) → Byte-Transfer. Reproduzierbar unter `deployment/windx-kind/`.
 
 ---
 
@@ -137,19 +137,39 @@ Offer-ID dynamisch). Ausführung im Skriptkopf dokumentiert.
 
 ---
 
-## 6. Offen: Stufe 4 — echter Datentransfer
+## 6. Stufe 4 — echter Datentransfer (verifiziert grün)
 
-Nur der Byte-Transfer steht aus (`POST /edrs` → EDR → Daten ziehen). Er braucht ein **echtes EC-Schlüsselpaar**
-für `signer-private`/`verifier-public` (aktuell Dummies in `tx.edc.vault.secrets`) — plus die Feinheit, dass das
-Seed-Format an `;`/`:` splittet, ein PEM/JWK also sauber reinpassen muss. Katalog + Negotiation brauchen die Keys
-**nicht** (deshalb bereits grün). Nebenbei: schon der bibas-Stack hat diese Keys nie geseedet (Transfers liefen
-dort über den MMS-Light-EDR-Pfad) — also ohnehin Neuland.
+Der Consumer-Pull (`HttpData`) läuft end-to-end. Was dafür nötig war:
+
+1. **Echtes EC-Schlüsselpaar** (P-256/ES256) für den Provider — die Data-Plane signiert damit den EDR-Token.
+   Seeding über EDCs kanonische Env-Var **`TX_EDC_VAULT_SECRETS`** aus einem k8s-Secret (Env-Werte behalten echte
+   Zeilenumbrüche → PEM passt sauber, kein Escaping-Problem). Der **Consumer** behält Dummy-Keys — beim
+   Consumer-Pull signiert **nur der Provider**.
+2. **`edc.dataplane.api.public.baseurl = http://windx-provider:19293/api/public`** — sonst bewirbt die EDR
+   `localhost:19293`, vom Consumer nicht erreichbar (→ HTTP 000).
+
+**Verifiziert (2026-07-15):**
+
+| Schritt | Ergebnis |
+|---|---|
+| `POST /edrs` (Negotiation + Transfer) | `transferProcessId` ausgestellt; EDR-Token **von der Data-Plane signiert** (`"kid":"verifier-public"`) → die echten EC-Keys greifen |
+| `GET /edrs/{id}/dataaddress` | Endpoint `http://windx-provider:19293/api/public` + Bearer-Token |
+| Datenabruf **mit** Token | **HTTP 200**, Backend-Body `{"componentResults":[…],"isSystemHealthy":true}` |
+| Gegenprobe **ohne** Token | **HTTP 401** — das Gate greift |
+
+Reproduktion: `deployment/windx-kind/transfer.sh` (+ `windx-seed.sh` vorab). Betriebsregeln (in-memory-Neustart →
+neu seeden, ConfigMap-Änderung → `rollout restart`) und der komplette Deploy im
+[deployment/windx-kind/README.md](../../deployment/windx-kind/README.md).
 
 ---
 
 ## 7. Fazit
 
-Zwei windx-Connectoren verhandeln im KinD-Cluster einen **echten Vertrag über DCP** — DID-basiert, DSP 2025, mit
-eigenem IdentityHub. Der Scope-Namensraum-Konflikt (`cx-dcp`) und die BPN-Erwartung (DSP 0.8) sind verstanden und
-gelöst; der Weg (DID/2025) ist verifiziert grün bis `FINALIZED`. Offen bleibt allein der Daten-Byte-Transfer
-(Stufe 4, echte EC-Keys).
+Zwei windx-Connectoren im KinD-Cluster führen einen **vollständigen DCP-Datenaustausch** durch — von der Identität
+bis zum echten Byte-Transfer, rein **DID-basiert über DSP 2025**, mit eigenem IdentityHub. Der
+Scope-Namensraum-Konflikt (`cx-dcp`) und die BPN-Erwartung (DSP 0.8) sind verstanden und gelöst; Katalog,
+Negotiation (`FINALIZED`) **und** Datentransfer (HTTP 200 mit Token, 401 ohne) sind verifiziert. Das Kernziel —
+Provider + Consumer verhandeln **und übertragen Daten** im Cluster — ist erreicht.
+
+Der komplette, reproduzierbare Stack liegt versioniert unter
+[deployment/windx-kind/](../../deployment/windx-kind/).
