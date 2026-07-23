@@ -5,10 +5,11 @@ Zwei `edc-runtime-windx`-Connectoren (Provider + Consumer) + eigener IdentityHub
 Verifiziert bis zum echten Datentransfer (Consumer-Pull, HttpData). Hintergrund & Entscheidungen:
 [../../docs/windx/phase-cluster-kind-ergebnisse.md](../../docs/windx/phase-cluster-kind-ergebnisse.md).
 
-> **⚠️ Nur für lokale Entwicklung.** `windx-stack.yaml` enthält **Wegwerf-Dev-Keys** im Klartext
-> (Superuser-API-Key, IdentityHub-STS-Seed-Key) — identisch zum `bibas`-Stack. Nicht für Produktion;
-> für einen echten Betrieb externalisieren (Vault/Sealed-Secrets) und rotieren. Das **EDR-Signing-Keypair**
-> (Stufe 4) liegt bewusst **nicht** in der YAML, sondern in einem zur Laufzeit erzeugten k8s-Secret.
+> **⚠️ Nur für lokale Entwicklung.** Die Geheimnisse stehen seit WP4 **nicht mehr im YAML** — sie werden
+> von [`windx-secrets.sh`](windx-secrets.sh) erzeugt (Krypto-Material frisch generiert, API-Keys als
+> Dev-Default `password`). Ein Wert im committeten YAML wäre Klartext in Git; base64 ist keine
+> Verschlüsselung. Für echten Betrieb fehlt weiterhin echtes Secret-Management (SealedSecrets/SOPS/Vault)
+> und Rotation — die Dev-API-Keys sind bewusst schwach, damit Demo und Skripte laufen.
 
 ---
 
@@ -17,8 +18,13 @@ Verifiziert bis zum echten Datentransfer (Consumer-Pull, HttpData). Hintergrund 
 | Datei | Zweck |
 |---|---|
 | `windx-stack.yaml` | Namespace, ConfigMaps, IdentityHub, Setup-Job, Provider + Consumer (Deployments/Services) |
+| `windx-postgres.yaml` | **PostgreSQL** (Deployment/Service/**PVC**) + DBs `provider`/`consumer`/`ihub` — die Persistenz-Basis |
+| `windx-secrets.sh` | Erzeugt alle statischen Geheimnisse als k8s-Secrets (stehen bewusst nicht im YAML) |
 | `windx-seed.sh` | Provider seeden (Asset + permissive Policy + ContractDef) + Katalog + Negotiation bis `FINALIZED` |
 | `transfer.sh` | Stufe 4: `/edrs` → EDR → Daten pullen (mit Gegenprobe ohne Token) |
+| `windx-demo.sh` | **Demonstrator 1:** die vier Schritte oben als eine erzählte Terminal-Vorführung (Story- + Technik-Ebene) |
+| `run-demo.sh` / `run-demo.ps1` | Host-Launcher für `windx-demo.sh` (Bash bzw. PowerShell; Preflight-Checks + Pod-Start) |
+| `windx-dashboard.py` | **Demonstrator 2:** derselbe Fluss als Web-Dashboard (Browser, live aufleuchtende Stufen) |
 
 Drei Runtime-Secrets werden **nicht** aus der YAML angelegt (weil dynamisch), sondern per Kommando (s. u.):
 `windx-sts-secrets`, `windx-edr-keys`, `windx-provider-vault-seed`.
@@ -30,11 +36,13 @@ Drei Runtime-Secrets werden **nicht** aus der YAML angelegt (weil dynamisch), so
 - KinD-Cluster `mvd` läuft; Kontext `kind-mvd`. `export KUBECONFIG=C:/Users/luf/Desktop/wind-x/kubernetes/.kube`
 - Diese Images lokal vorhanden → per `kind load` in den Cluster:
   ```sh
-  kind load docker-image edc-runtime-windx:0.13.0-SNAPSHOT --name mvd
+  kind load docker-image edc-runtime-windx-postgresql:0.13.0-SNAPSHOT --name mvd
   kind load docker-image lufbiba/fma-identityhub:0.17 --name mvd
   kind load docker-image reg.biba.uni-bremen.de/wind-x/luf-bibas-connector:jira132-es256k --name mvd
   ```
-  (`edc-runtime-windx` via `./gradlew :edc-controlplane:edc-runtime-windx:dockerize`.)
+  (`edc-runtime-windx-postgresql` via `./gradlew :edc-controlplane:edc-runtime-windx-postgresql:dockerize`.)
+  Das ist die **persistente** Runtime: gleiche windx-Extensions wie `edc-runtime-windx`, aber mit SQL-Stores.
+  Die reine In-Memory-Variante `edc-runtime-windx` bleibt für schnelle Demos erhalten.
 
 ---
 
@@ -42,6 +50,12 @@ Drei Runtime-Secrets werden **nicht** aus der YAML angelegt (weil dynamisch), so
 
 ```sh
 CTX="--context kind-mvd"; NS="-n windx"
+
+# 0) PostgreSQL + Geheimnisse. windx-secrets.sh ist idempotent (vorhandene Secrets bleiben
+#    unangetastet); es generiert das Krypto-Material und setzt die Dev-API-Keys auf `password`.
+kubectl $CTX apply -f windx-postgres.yaml
+kubectl $CTX $NS rollout status deploy/windx-postgres --timeout=120s
+./windx-secrets.sh
 
 # 1) Stack ausrollen (Provider/Consumer bleiben Init, bis ihre Vault-Seeds existieren)
 kubectl $CTX apply -f windx-stack.yaml
@@ -89,14 +103,57 @@ run transfer.sh      # -> MIT Token: {"isSystemHealthy":true} [HTTP 200] ; OHNE 
 
 ---
 
+## Demonstrator (narrativer Walkthrough)
+
+`windx-demo.sh` fasst Seed → Katalog → Negotiation → Transfer zu **einer** durchgängigen
+Vorführung in 4 Akten zusammen. Höhepunkt ist der Tor-Kontrast: dieselbe Datenadresse liefert
+**mit** Vertrag HTTP 200, **ohne** Vertrag HTTP 401. Für gemischtes Publikum gibt es zwei
+Ebenen — eine Story-Ebene (Klartext) und eine Technik-Ebene (echte Requests/IDs/HTTP-Codes).
+
+```sh
+deployment/windx-kind/run-demo.sh                 # volle Demo (Story + Technik)
+STORY_ONLY=1 deployment/windx-kind/run-demo.sh    # nur die Story-Ebene (Nicht-Techniker)
+PAUSE=4      deployment/windx-kind/run-demo.sh     # längere Pausen zum Mitmoderieren
+```
+
+Voraussetzung wie bei `windx-seed.sh`/`transfer.sh` (Stack deployt, STS-Secrets, EDR-Keys).
+Fehlen die EDR-Signing-Keys, laufen die Akte 1–3 trotzdem; Akt 4 bricht vor dem Datenabruf
+sauber ab. Der Launcher warnt im Preflight, wenn ein Secret fehlt.
+
+### Demonstrator 2 — Web-Dashboard
+
+`windx-dashboard.py` zeigt denselben Fluss im Browser: vier Stufen, die live grün aufleuchten,
+mit dem 200/401-Tor-Kontrast als Höhepunkt. Da der Cluster kein Ingress hat, öffnet das Skript
+selbst drei `kubectl port-forward` (Consumer-Mgmt, Provider-Mgmt, Provider-Public), fährt den
+Ablauf host-seitig und streamt jeden Schritt per Server-Sent-Events an die Seite. Nur
+Python-Standardbibliothek — kein `pip` nötig.
+
+```sh
+python deployment/windx-kind/windx-dashboard.py     # öffnet http://localhost:8088 im Browser
+```
+
+Steuerung im Browser: **„Demo starten"**-Button, Umschalter **„Technik-Details"** (Story- vs.
+Technik-Ebene, wie bei Demonstrator 1). Env-Optionen: `NO_BROWSER=1` (Fenster nicht öffnen),
+`ONESHOT=1` (Server nach einem Durchlauf beenden, für CI), `DASH_PORT=<port>`. Strg+C beendet
+und räumt die Port-Forwards auf.
+
+**UI-Vorschau ohne Cluster:** `http://localhost:8088/?preview` spielt den Ablauf mit
+Beispieldaten ab — praktisch zum Zeigen der Oberfläche oder für Screenshots.
+
+---
+
 ## Betriebsregeln (wichtig — hier steckt viel Debugging drin)
 
-- **IdentityHub + Connectoren sind rein in-memory.** Jeder Container-/Pod-Neustart wischt den Zustand:
-  - **Provider-Roll** → Asset/Policy/ContractDef weg → `windx-seed.sh` erneut laufen lassen.
+- **Connectoren sind persistent, der IdentityHub noch nicht.** Stand der Persistenz-Umstellung:
+  - **Provider-/Consumer-Roll** → **unkritisch**. Assets, Policies, ContractDefs, Negotiations, Agreements
+    und der EDR-Cache liegen in PostgreSQL (DBs `provider`/`consumer`) und überleben den Neustart.
+    Kein erneutes `windx-seed.sh` nötig.
   - **IdentityHub-Roll** (z. B. Host über Nacht suspendiert → Liveness-Probe) → Participants + STS-Accounts
     weg → **Setup-Job erneut** laufen lassen, **neue** STS-Secrets ziehen, `windx-sts-secrets` **und**
     `windx-provider-vault-seed` neu bauen, Connectoren neu starten. Symptom sonst: STS `401 invalid_client`.
     *Pod-Alter täuscht* — auf `restartCount` schauen, nicht auf das Alter.
+    Das behebt erst WP3 (IH auf SQL-Stores); aktuell blockiert, weil sich der `fma-IdentityHub`
+    nicht mehr bauen lässt (0.18-SNAPSHOT-Drift — Details im Projekt-Memory).
 - **ConfigMap-Änderung rollt den Pod nicht.** Nach einer ConfigMap-Änderung explizit
   `kubectl rollout restart deploy/windx-provider` (sonst kopiert der `assemble-config`-Init-Container die alte
   Version weiter).

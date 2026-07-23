@@ -46,15 +46,13 @@ kind: Namespace
 metadata:
   name: windx
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: windx-superuser-apikey
-  namespace: windx
-type: Opaque
-stringData:
-  # Format wie vom IdentityHub erwartet: base64(principalId).base64(random)
-  apikey: c3VwZXItdXNlcg==.YmliYXMtc3VwZXJ1c2VyLWtleS0yMDI2
+# Geheimnisse stehen bewusst NICHT hier (WP4): ein Wert im committeten YAML ist Klartext in Git.
+# Sie werden per `./windx-secrets.sh` erzeugt -- gleiches Muster wie windx-sts-secrets,
+# windx-provider-vault-seed und windx-edr-keys. Erwartet werden:
+#   windx-superuser-apikey  (apikey)                     -> IdentityHub + Setup-Job
+#   windx-ih-secrets        (sts-privatekey, aes-key, api-auth-key, sts-accounts-api-auth-key)
+#   windx-connector-api-key (apikey)                     -> Management-API Provider/Consumer
+#   windx-db                (password)                   -> PostgreSQL (s. windx-postgres.yaml)
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -80,9 +78,12 @@ data:
     # 'http://localhost:19293/api/public' abgeleitet -> vom Consumer nicht erreichbar.
     edc.dataplane.api.public.baseurl=http://windx-provider:19293/api/public
 
-    edc.api.auth.key=password
+    # edc.api.auth.key kommt als Env EDC_API_AUTH_KEY aus dem Secret windx-connector-api-key (WP4).
 
     edc.participant.id=did:web:windx-identityhub:provider
+    # Pflicht-Setting der persistenten (SQL-)Runtime: ConnectorPostgresqlMigration bricht ohne ab.
+    # Stabil halten -- "once set, it must never change" (EDC-Vorgabe).
+    edc.participant.context.id=did:web:windx-identityhub:provider
     edc.iam.issuer.id=did:web:windx-identityhub:provider
     tractusx.edc.participant.bpn=BPNL000000000PROV
 
@@ -135,9 +136,12 @@ data:
     web.http.public.port=19292
     web.http.public.path=/api/public
 
-    edc.api.auth.key=password
+    # edc.api.auth.key kommt als Env EDC_API_AUTH_KEY aus dem Secret windx-connector-api-key (WP4).
 
     edc.participant.id=did:web:windx-identityhub:consumer
+    # Pflicht-Setting der persistenten (SQL-)Runtime: ConnectorPostgresqlMigration bricht ohne ab.
+    # Stabil halten -- "once set, it must never change" (EDC-Vorgabe).
+    edc.participant.context.id=did:web:windx-identityhub:consumer
     edc.iam.issuer.id=did:web:windx-identityhub:consumer
     tractusx.edc.participant.bpn=BPNL000000000CONS
 
@@ -250,12 +254,22 @@ spec:
             - { name: EDC_IAM_DID_WEB_USE_HTTPS, value: "false" }
             - { name: EDC_IAM_STS_PUBLICKEY_ID,  value: my-sts-key }
             - { name: EDC_IAM_STS_PRIVATEKEY_ALIAS, value: sts-private-key }
-            - { name: EDC_STS_ACCOUNTS_API_AUTH_KEY, value: password }
-            - { name: EDC_API_AUTH_KEY,          value: password }
+            # WP4: Werte kommen aus Secrets (windx-secrets.sh), nicht mehr im Klartext hier.
+            - name: EDC_STS_ACCOUNTS_API_AUTH_KEY
+              valueFrom:
+                secretKeyRef: { name: windx-ih-secrets, key: sts-accounts-api-auth-key }
+            - name: EDC_API_AUTH_KEY
+              valueFrom:
+                secretKeyRef: { name: windx-ih-secrets, key: api-auth-key }
             - { name: EDC_ENCRYPTION_AES_KEY_ALIAS, value: sts-aes-key }
-            - { name: EDC_SEED_AES_KEY_VALUE,    value: KHHKtosH825tgKKWhBBGIgGmkJOrR88b0jNheKWr3as= }
+            - name: EDC_SEED_AES_KEY_VALUE
+              valueFrom:
+                secretKeyRef: { name: windx-ih-secrets, key: aes-key }
+            # PEM mit echten Zeilenumbruechen -- Env-Werte behalten sie; die SuperUserSeedExtension
+            # ersetzt nur literale \n, ist hier also ein No-op.
             - name: EDC_SEED_STS_PRIVATEKEY_VALUE
-              value: "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEICNKDXHgrPPj3JYJP/44BaE4GtEitwSfHYjpjtBTYAXfoAoGCCqGSM49\nAwEHoUQDQgAE9wHS+9kqOHbbkkqHYlfI8OUYMhsuiBngaFTgk2yqs2MXZDTjG9f0\nc+O03QZK0beMCQgTxpZbCgjiHk9uEp9cfg==\n-----END EC PRIVATE KEY-----\n"
+              valueFrom:
+                secretKeyRef: { name: windx-ih-secrets, key: sts-privatekey }
             - name: EDC_IH_SEED_SUPERUSER_APIKEY
               valueFrom:
                 secretKeyRef:
@@ -376,7 +390,7 @@ spec:
             - { name: config-out, mountPath: /config-out }
       containers:
         - name: connector
-          image: edc-runtime-windx:0.13.0-SNAPSHOT
+          image: edc-runtime-windx-postgresql:0.13.0-SNAPSHOT
           imagePullPolicy: IfNotPresent
           args: ["--log-level=DEBUG"]   # DEBUG-Logs des DCP-Flusses (Programm-Argument, kein Setting)
           env:
@@ -387,6 +401,19 @@ spec:
                 secretKeyRef:
                   name: windx-provider-vault-seed
                   key: seed
+            # WP4: Management-API-Key aus Secret statt Klartext in der ConfigMap.
+            - name: EDC_API_AUTH_KEY
+              valueFrom:
+                secretKeyRef: { name: windx-connector-api-key, key: apikey }
+            # Persistenz: die SQL-Stores der persistenten Runtime schreiben in DB `provider`.
+            # Env-Var-Form (chart-konform): EDC_DATASOURCE_DEFAULT_* == edc.datasource.default.*
+            - { name: EDC_DATASOURCE_DEFAULT_URL,  value: "jdbc:postgresql://windx-postgres:5432/provider" }
+            - { name: EDC_DATASOURCE_DEFAULT_USER, value: edc }
+            - name: EDC_DATASOURCE_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: windx-db
+                  key: password
           ports:
             - { name: api,      containerPort: 18180 }
             - { name: mgmt,     containerPort: 18181 }
@@ -474,9 +501,22 @@ spec:
             - { name: config-out, mountPath: /config-out }
       containers:
         - name: connector
-          image: edc-runtime-windx:0.13.0-SNAPSHOT
+          image: edc-runtime-windx-postgresql:0.13.0-SNAPSHOT
           imagePullPolicy: IfNotPresent
           args: ["--log-level=DEBUG"]   # DEBUG-Logs des DCP-Flusses (Programm-Argument, kein Setting)
+          env:
+            # WP4: Management-API-Key aus Secret statt Klartext in der ConfigMap.
+            - name: EDC_API_AUTH_KEY
+              valueFrom:
+                secretKeyRef: { name: windx-connector-api-key, key: apikey }
+            # Persistenz: die SQL-Stores der persistenten Runtime schreiben in DB `consumer`.
+            - { name: EDC_DATASOURCE_DEFAULT_URL,  value: "jdbc:postgresql://windx-postgres:5432/consumer" }
+            - { name: EDC_DATASOURCE_DEFAULT_USER, value: edc }
+            - name: EDC_DATASOURCE_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: windx-db
+                  key: password
           ports:
             - { name: api,      containerPort: 28180 }
             - { name: mgmt,     containerPort: 28181 }
