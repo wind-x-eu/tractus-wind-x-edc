@@ -167,8 +167,6 @@ include("edc-tests:runtime:runtime-compatibility:snapshot:connector-snapshot")
 include(":edc-controlplane")
 include(":edc-controlplane:edc-controlplane-base")
 include(":edc-controlplane:edc-runtime-memory")
-include(":edc-controlplane:edc-runtime-windx")
-include(":edc-controlplane:edc-runtime-windx-postgresql")
 include(":edc-controlplane:edc-controlplane-postgresql-hashicorp-vault")
 
 // modules for dataplane artifacts
