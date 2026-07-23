@@ -276,7 +276,7 @@ public class MediatorConsumerPullTest {
     }
 
     @Test
-    void mmsAsset_offersMmsPullAndHttpDataPush() {
+    void mmsAsset_offersMmsPullMmsPushAndHttpDataPush() {
         var assetId = "mms-asset-1";
 
         Map<String, Object> dataAddress = Map.of(
@@ -295,8 +295,8 @@ public class MediatorConsumerPullTest {
         PROVIDER.createContractDefinition(assetId, "def-mms-1", accessPolicyId, contractPolicyId);
 
         // Advertising-Test (kein MMS-Server noetig, da kein Datenfluss): der Provider muss fuer das
-        // mms-Asset 'Mms-PULL' (Phase 4a, EDR-Registry) UND 'HttpData-PUSH' (push-once ueber den
-        // Standard-HttpData-Sink + registrierte mms-Source) anbieten.
+        // mms-Asset 'Mms-PULL' (Phase 4a, EDR-Registry), 'Mms-PUSH' (MmsPushSinkFactory, Sink-Typ 'Mms')
+        // UND 'HttpData-PUSH' (push-once ueber den Standard-HttpData-Sink) anbieten.
         var datasets = CONSUMER.getCatalogDatasets(PROVIDER);
         var mmsDataset = datasets.stream()
                 .map(JsonValue::asJsonObject)
@@ -306,6 +306,7 @@ public class MediatorConsumerPullTest {
 
         var offered = mmsDataset.toString();
         assertThat(offered).contains("Mms-PULL");
+        assertThat(offered).contains("Mms-PUSH");
         assertThat(offered).contains("HttpData-PUSH");
     }
 
