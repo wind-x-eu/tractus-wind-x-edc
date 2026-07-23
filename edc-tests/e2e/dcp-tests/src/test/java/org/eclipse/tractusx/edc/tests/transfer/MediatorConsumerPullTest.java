@@ -73,8 +73,14 @@ import static org.eclipse.tractusx.edc.tests.transfer.dcp.runtime.Runtimes.stsRu
 
 /**
  * End-to-end Consumer-Pull-Test fuer den Wind-X-{@code MediatorHttpData}-Typ ueber echtes DCP
- * (IdentityHub + STS + Credentials), aber <b>Docker-frei</b>: BDRS wird durch {@link MockBdrsClient}
- * ersetzt (siehe {@code DcpPresentationFlowTest}), die BDRS-URL bleibt ein Dummy.
+ * (IdentityHub + STS + Credentials), aber <b>Docker-frei</b>: es laeuft kein BDRS-Server.
+ *
+ * <p><b>BDRS:</b> Der <b>Provider</b> laeuft mit dem produktiven {@code windx-bdrs-static} — sein Runtime-Modul
+ * schliesst {@code bdrs-client} aus und laedt {@code WindxStaticBdrsExtension} via ServiceLoader, die BPN↔DID-
+ * Abbildung kommt aus {@code tx.edc.windx.bdrs.mappings}. Damit ist die Extension in einer <i>echten</i>
+ * DCP-Kette bewiesen (Katalog, Negotiation, Transfer, EDR-Pull), nicht nur im Unit-Test. Der <b>Consumer</b>
+ * behaelt den {@link MockBdrsClient}: seine Runtime {@code runtime-memory-dcp-ih} ist ein geteiltes
+ * Upstream-Modul, an dem andere Tests haengen.
  *
  * <p>Aufgebaut nach Vorbild von {@code StsConsumerPullTest}. Der Provider laedt zusaetzlich unsere
  * {@link MediatorDataPlaneExtension} (per {@code registerSystemExtension}); ein WireMock stubt den
@@ -132,10 +138,12 @@ public class MediatorConsumerPullTest {
             () -> CONSUMER.dcpConfig().merge(bdrsDummyConfig()))
             .registerServiceMock(BdrsClient.class, mockBdrs());
 
+    // Der Provider laeuft mit dem echten windx-bdrs-static (kein Mock): sein Runtime-Modul schliesst bdrs-client
+    // aus und laedt stattdessen WindxStaticBdrsExtension via ServiceLoader — genau wie die Produktions-Runtime.
+    // Damit beweist dieser Test die Extension in einer echten DCP-Kette, nicht nur im Unit-Test.
     @RegisterExtension
     private static final RuntimeExtension PROVIDER_RUNTIME = dcpRuntimeWithMediator(PROVIDER.getName(), PROVIDER.getKeyPair(),
-            () -> PROVIDER.dcpConfig().merge(bdrsDummyConfig()).merge(mediatorConfig()))
-            .registerServiceMock(BdrsClient.class, mockBdrs());
+            () -> PROVIDER.dcpConfig().merge(windxBdrsConfig()).merge(mediatorConfig()));
 
     @RegisterExtension
     private static final RuntimeExtension STS_RUNTIME = stsRuntime(STS.getName(), STS.getKeyPair(),
@@ -268,7 +276,7 @@ public class MediatorConsumerPullTest {
     }
 
     @Test
-    void mmsAsset_offersMmsPullAndHttpDataPush() {
+    void mmsAsset_offersMmsPullMmsPushAndHttpDataPush() {
         var assetId = "mms-asset-1";
 
         Map<String, Object> dataAddress = Map.of(
@@ -287,8 +295,8 @@ public class MediatorConsumerPullTest {
         PROVIDER.createContractDefinition(assetId, "def-mms-1", accessPolicyId, contractPolicyId);
 
         // Advertising-Test (kein MMS-Server noetig, da kein Datenfluss): der Provider muss fuer das
-        // mms-Asset 'Mms-PULL' (Phase 4a, EDR-Registry) UND 'HttpData-PUSH' (push-once ueber den
-        // Standard-HttpData-Sink + registrierte mms-Source) anbieten.
+        // mms-Asset 'Mms-PULL' (Phase 4a, EDR-Registry), 'Mms-PUSH' (MmsPushSinkFactory, Sink-Typ 'Mms')
+        // UND 'HttpData-PUSH' (push-once ueber den Standard-HttpData-Sink) anbieten.
         var datasets = CONSUMER.getCatalogDatasets(PROVIDER);
         var mmsDataset = datasets.stream()
                 .map(JsonValue::asJsonObject)
@@ -298,6 +306,7 @@ public class MediatorConsumerPullTest {
 
         var offered = mmsDataset.toString();
         assertThat(offered).contains("Mms-PULL");
+        assertThat(offered).contains("Mms-PUSH");
         assertThat(offered).contains("HttpData-PUSH");
     }
 
@@ -389,6 +398,18 @@ public class MediatorConsumerPullTest {
         // BdrsClientExtension hat ein Pflicht-Setting; der MockBdrsClient ueberschreibt den @Provider,
         // die URL wird nie kontaktiert (vgl. DcpPresentationFlowTest).
         return ConfigFactory.fromMap(Map.of("tx.edc.iam.dcp.bdrs.server.url", "http://localhost:1/bdrs"));
+    }
+
+    /**
+     * Config fuer den Provider, der statt bdrs-client unser {@code windx-bdrs-static} laedt: die BPN↔DID-Abbildung
+     * kommt aus dem Setting statt von einem BDRS-Server. {@code tx.edc.iam.dcp.bdrs.server.url} entfaellt hier
+     * ersatzlos — dass der Provider ohne dieses Pflicht-Setting bootet, ist Teil der Aussage dieses Tests.
+     */
+    private static Config windxBdrsConfig() {
+        var mappings = "%s=%s;%s=%s".formatted(
+                CONSUMER.getBpn(), CONSUMER.getDid(),
+                PROVIDER.getBpn(), PROVIDER.getDid());
+        return ConfigFactory.fromMap(Map.of("tx.edc.windx.bdrs.mappings", mappings));
     }
 
     private static Config mediatorConfig() {

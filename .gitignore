@@ -128,3 +128,12 @@ edc-tests/miw-tests/src/test/resources/docker-environment/postgres_data/
 .project
 .settings/
 bin/
+
+# Data-Plane-Signierschluessel (erzeugt von windx-cx-dataplane-keys.sh) -- kein Schluesselmaterial ins Git
+deployment/windx-catenax/values-windx-*-keys.yaml
+
+# Claude Code -- lokale Einstellungen
+.claude/
+
+# Python-Bytecode (Demo-/Hilfsskripte)
+__pycache__/

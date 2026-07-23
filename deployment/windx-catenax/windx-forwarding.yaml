@@ -1,0 +1,82 @@
+# Wind-X MMS-Forwarding-Service (Nachbildung) -- Push-Ziel fuer den Transfertyp `Mms-PUSH`.
+# Der Code kommt aus der ConfigMap windx-forwarding (windx-forwarding-deploy.sh erzeugt sie aus
+# windx-forwarding.py) -- kein Image-Build noetig, python:3.12-alpine genuegt (Muster: windx-dashboard).
+#
+# Push-Ziel aus Sicht der Provider-Data-Plane (gleicher Namespace):
+#     http://windx-forwarding:4000/log?signal=<sensor>
+# Lesepfad von aussen (fuer die Data-Explorer-UI, hosts-/Proxy-Eintrag auf 10.103.45.212):
+#     http://windx-forwarding.tx.test/log?signal=<sensor>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: windx-forwarding
+  namespace: windx
+  labels: { app: windx-forwarding }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: windx-forwarding }
+  template:
+    metadata:
+      labels: { app: windx-forwarding }
+    spec:
+      containers:
+        - name: forwarding
+          image: python:3.12-alpine
+          command: ["python3", "/app/forwarding.py"]
+          ports:
+            - containerPort: 4000
+          env:
+            # EIN Simulator fuer beide Datenraeume: der Showcase des Kollegen liest den iecsim auf
+            # agilevt-dev, also lesen wir denselben. Vorher zeigten wir auf den iecsim im Cluster
+            # (Logical Device WPPSLD2) -- dessen Anlagenmodell ist ein anderes, weshalb Signale aus
+            # der UI-Auswahl (z. B. WPPD1$MX$Hz$mag$f) dort mit "ERROR code=10"
+            # (object-non-existent) quittiert wurden. Port 102 ist aus dem Cluster erreichbar.
+            - { name: MMS_HOST, value: "agilevt-dev.ikap.biba.uni-bremen.de" }
+            - { name: MMS_PORT, value: "102" }
+            - { name: MMS_LOGICAL_DEVICE, value: "WPPS" }
+          volumeMounts:
+            - { name: code, mountPath: /app }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 4000 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: code
+          configMap:
+            name: windx-forwarding
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: windx-forwarding
+  namespace: windx
+  labels: { app: windx-forwarding }
+spec:
+  selector: { app: windx-forwarding }
+  ports:
+    - { name: http, port: 4000, targetPort: 4000 }
+---
+# Lesepfad fuer die UI (Muster windx-cx-mgmt-ingress.yaml / windx-demo.tx.test): der
+# ingress-nginx-Controller laeuft als DaemonSet mit hostNetwork auf Port 80 jeder Node.
+# Kein hosts-Eintrag noetig, wenn der Aufrufer die Node-IP anspricht und den Host-Header setzt.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: windx-forwarding
+  namespace: windx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: windx-forwarding.tx.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: windx-forwarding
+                port: { number: 4000 }

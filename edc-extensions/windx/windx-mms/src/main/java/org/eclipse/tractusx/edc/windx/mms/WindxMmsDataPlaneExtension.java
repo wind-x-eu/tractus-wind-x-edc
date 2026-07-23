@@ -44,8 +44,8 @@ import static org.eclipse.tractusx.edc.windx.mms.WindxMmsDataPlaneExtension.NAME
  * treiben den portierten {@code mms.client}-Stack (roher IEC-61850/MMS-Client), der eine JSON-Aggregation
  * liefert.</p>
  *
- * <p>Drei Registrierungen (analog {@code windx-mediator-proxy}), damit der Provider {@code Mms-PULL}
- * anbietet und der Consumer die Daten ueber die <b>Standard</b>-Data-Plane-Public-API zieht:</p>
+ * <p>Vier Registrierungen (analog {@code windx-mediator-proxy}), damit der Provider {@code Mms-PULL}
+ * und {@code Mms-PUSH} anbietet:</p>
  * <ol>
  *   <li>{@link PipelineService#registerFactory} mit Source-Typ {@code mms} (Asset-{@code dataAddress.type}).</li>
  *   <li>{@link EndpointDataReferenceServiceRegistry#register} fuer Destination-Typ {@code Mms}
@@ -53,6 +53,10 @@ import static org.eclipse.tractusx.edc.windx.mms.WindxMmsDataPlaneExtension.NAME
  *   <li>{@link PublicEndpointGeneratorService#addGeneratorFunction} fuer {@code Mms} → EDR-Endpoint zeigt
  *       auf die Standard-Public-API ({@code edc.dataplane.api.public.baseurl}); deren Controller ist
  *       source-typ-agnostisch und oeffnet die registrierte {@code mms}-Source.</li>
+ *   <li>{@link PipelineService#registerFactory} mit der {@link MmsPushSinkFactory} (Sink-Typ {@code Mms})
+ *       → die Self-Registration berechnet PUSH-Transfertypen aus {@code supportedSinkTypes()} und bewirbt
+ *       {@code Mms-PUSH}; kontinuierlich wird der Push erst mit Asset-Property {@code edc:isNonFinite=true}
+ *       (BIBA-{@code MMSPushTask}-Ersatz, s. {@link MmsPushSink}).</li>
  * </ol>
  */
 @Extension(value = NAME)
@@ -71,7 +75,7 @@ public class WindxMmsDataPlaneExtension implements ServiceExtension {
      * ein einheitlicher Typ {@code Mms} (wie bei {@code MmsLight}). Property-Keys bleiben {@code mms:*}.</p>
      */
     public static final String MMS_SOURCE_TYPE = "Mms";
-    /** Destination-/EDR-Typ → Transfer-Typ {@code Mms-PULL} (BIBA-treu); identisch zu {@link #MMS_SOURCE_TYPE}. */
+    /** Destination-/EDR-/Sink-Typ → Transfer-Typen {@code Mms-PULL} + {@code Mms-PUSH} (BIBA-treu); identisch zu {@link #MMS_SOURCE_TYPE}. */
     public static final String MMS_TRANSFER_DESTINATION_TYPE = "Mms";
 
     private static final String DEFAULT_PUBLIC_PORT = "8185";
@@ -124,8 +128,12 @@ public class WindxMmsDataPlaneExtension implements ServiceExtension {
         var endpoint = Endpoint.url(pullUrl);
         generatorService.addGeneratorFunction(MMS_TRANSFER_DESTINATION_TYPE, dataAddress -> endpoint);
 
-        monitor.info("%s initialized: source type '%s', transfer type '%s-PULL', pull endpoint '%s'"
-                .formatted(NAME, MMS_SOURCE_TYPE, MMS_TRANSFER_DESTINATION_TYPE, pullUrl));
+        // 4) Sink-Typ 'Mms' -> die Self-Registration berechnet PUSH-Transfertypen aus supportedSinkTypes()
+        //    und bewirbt 'Mms-PUSH'; die PipelineService dispatcht ueber dataDestination.type hierher.
+        pipelineService.registerFactory(new MmsPushSinkFactory(monitor));
+
+        monitor.info("%s initialized: source type '%s', transfer types '%s-PULL' + '%s-PUSH', pull endpoint '%s'"
+                .formatted(NAME, MMS_SOURCE_TYPE, MMS_TRANSFER_DESTINATION_TYPE, MMS_TRANSFER_DESTINATION_TYPE, pullUrl));
     }
 
     private String resolvePublicBaseUrl(org.eclipse.edc.spi.monitor.Monitor monitor) {

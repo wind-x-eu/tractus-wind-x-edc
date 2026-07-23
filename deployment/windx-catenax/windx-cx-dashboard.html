@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wind-X Demonstrator</title>
+<style>
+  /* Viel Weiss, ruhig, sachlich -- stilistisch verwandt mit dem Wind-X-Dashboard, kein Klon. */
+  :root {
+    --bg: #FAFBFC; --panel: #FFFFFF; --ink: #1E2833; --muted: #66727F;
+    --line: #E4E8EC; --accent: #2F5D8C; --accent-weak: #EBF1F7;
+    --ok: #3A7D44; --ok-weak: #EDF4EE; --err: #B4443C; --err-weak: #F8EDEC;
+    --warn: #8A6D1F; --warn-weak: #F7F1E2;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  .mono { font-family: Consolas, ui-monospace, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 48px; }
+
+  header { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 26px 0 18px; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 350; }
+  header h1 b { font-weight: 650; }
+  header .unter { font-size: 13px; color: var(--muted); }
+
+  .rollen { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .rollen button { font: inherit; font-size: 14px; border: 0; background: transparent;
+                   color: var(--muted); padding: 9px 22px; cursor: pointer; }
+  .rollen button.aktiv { background: var(--accent); color: #fff; font-weight: 600; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .edc { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .edc .wahl { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+  .edc .wahl button { font: inherit; font-size: 12.5px; border: 0; background: transparent;
+                      color: var(--muted); padding: 6px 13px; cursor: pointer; }
+  .edc .wahl button.aktiv { color: var(--accent); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+  .edc .wahl button:disabled { cursor: not-allowed; }
+  .edc small { font-size: 11px; color: var(--muted); }
+
+  .kachel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .kachel + .kachel, section + section { margin-top: 18px; }
+  .kachel-kopf { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+                 padding: 13px 18px; border-bottom: 1px solid var(--line); }
+  .kachel-kopf h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .06em;
+                    text-transform: uppercase; color: var(--muted); }
+  .kachel-kopf .rechts { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+
+  .pille { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 4px; padding: 1px 9px; }
+  .pille.ok { background: var(--ok-weak); color: var(--ok); }
+  .pille.err { background: var(--err-weak); color: var(--err); }
+  .pille.warn { background: var(--warn-weak); color: var(--warn); }
+  .pille.blau { background: var(--accent-weak); color: var(--accent); }
+
+  .messkopf { display: flex; align-items: baseline; gap: 30px; flex-wrap: wrap; padding: 16px 18px 0; }
+  .messkopf .haupt .w { font-size: 32px; font-weight: 600; line-height: 1; }
+  .messkopf .haupt .e { color: var(--muted); font-size: 13.5px; margin-left: 6px; }
+  .messkopf .neben { display: flex; gap: 26px; flex-wrap: wrap; margin-left: auto; }
+  .stat { display: flex; flex-direction: column; }
+  .stat .w { font-size: 16px; font-weight: 600; }
+  .stat .l { font-size: 11.5px; color: var(--muted); }
+  svg.graph { display: block; width: 100%; height: auto; }
+  .graph-fuss { padding: 6px 18px 12px; font-size: 12px; color: var(--muted); }
+
+  .karte-inhalt { padding: 16px 18px; }
+  .zeile { display: flex; gap: 12px; font-size: 13.5px; margin-top: 4px; flex-wrap: wrap; align-items: baseline; }
+  .zeile b { font-weight: 400; color: var(--muted); min-width: 120px; font-size: 12.5px; }
+  .knopf { font: inherit; font-size: 14px; font-weight: 600; border: 1px solid var(--accent);
+           border-radius: 6px; padding: 8px 20px; background: var(--accent); color: #fff; cursor: pointer; }
+  .knopf.zweit { background: transparent; color: var(--accent); }
+  .knopf.leise { background: transparent; color: var(--muted); border-color: var(--line); font-weight: 400; }
+  .knopf:disabled { opacity: .5; cursor: default; }
+  .knopfzeile { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  .hinweis { font-size: 12.5px; color: var(--muted); }
+
+  .freigabe-eintrag { display: flex; gap: 16px; align-items: center; padding: 14px 18px;
+                      border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .freigabe-eintrag:last-child { border-bottom: 0; }
+  .freigabe-eintrag .titel { font-weight: 600; }
+  .freigabe-eintrag .details { font-size: 12.5px; color: var(--muted); }
+  .leer { padding: 18px; font-size: 13.5px; color: var(--muted); }
+
+  .rolle-log { padding: 12px 18px; font-size: 12px; line-height: 1.85; max-height: 260px;
+               overflow: auto; white-space: pre-wrap; }
+  .rolle-log .t { color: var(--muted); }
+  .rolle-log .gut { color: var(--ok); }
+  .rolle-log .fehler { color: var(--err); }
+  .rolle-log .warn { color: var(--warn); }
+
+  .laden { display: inline-block; font-size: 12.5px; color: var(--accent); }
+  footer { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line);
+           font-size: 12.5px; color: var(--muted); display: flex; gap: 22px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1><b>Wind-X</b> Demonstrator</h1>
+      <div class="unter">Turbinen-Telemetrie über den Catena-X-Datenraum</div>
+    </div>
+    <div class="rollen" role="tablist">
+      <button id="tab-b" class="aktiv" onclick="rolle('b')">Betreiber</button>
+      <button id="tab-d" onclick="rolle('d')">Dienstleister</button>
+    </div>
+    <div class="edc">
+      <div class="wahl">
+        <button class="aktiv" type="button">Tractus-X EDC</button>
+        <button type="button" disabled>Eclipse EDC</button>
+      </div>
+      <small>Eclipse-EDC-Anbindung in Vorbereitung</small>
+    </div>
+  </header>
+
+  <!-- ================= Betreiber ================= -->
+  <div id="ansicht-b">
+    <section class="kachel">
+      <div class="kachel-kopf">
+        <h2>Anlage · Live</h2>
+        <span class="pille blau">Direktpfad IEC 61850/MMS</span>
+        <span class="rechts" id="b-pfadstatus">verbinde …</span>
+      </div>
+      <div class="messkopf">
+        <div class="haupt"><span class="w num" id="b-wind">–,––</span><span class="e">m/s Wind</span></div>
+        <div class="neben">
+          <div class="stat"><span class="w num" id="b-leistung">–</span><span class="l">Leistung kW</span></div>
+          <div class="stat"><span class="w num" id="b-rotor">–</span><span class="l">Rotor rpm</span></div>
+          <div class="stat"><span class="w num" id="b-oel">–</span><span class="l">Getriebeöl °C</span></div>
+          <div class="stat"><span class="w" id="b-status">–</span><span class="l">Status</span></div>
+        </div>
+      </div>
+      <svg class="graph" id="b-graph" viewBox="0 0 1032 210" role="img" aria-label="Windgeschwindigkeit live"></svg>
+      <div class="graph-fuss">Messstelle WPPSLD2 · 1 Wert / 1,5 s · direkt von der Anlage, nicht über den Datenraum</div>
+    </section>
+
+    <section class="kachel">
+      <div class="kachel-kopf"><h2>Freigabe im Datenraum</h2><span class="rechts" id="b-freigabe-status"></span></div>
+      <div class="karte-inhalt">
+        <div class="zeile"><b>Datensatz</b><span>Turbinen-Telemetrie (Leistung, Wind, Rotor, Öltemperatur, Status)</span></div>
+        <div class="zeile"><b>Bedingung</b><span>Zugriff nur mit gültigem MembershipCredential <span class="mono">(Membership eq active)</span></span></div>
+        <div class="zeile"><b>Anbieter</b><span class="mono">BPNL00000003AVTH</span></div>
+        <div class="knopfzeile">
+          <button class="knopf" id="b-freigeben" onclick="freigeben()">Daten freigeben</button>
+          <button class="knopf leise" id="b-zurueck" onclick="zurueckziehen()">Freigabe zurückziehen</button>
+          <span class="hinweis">Die Freigabe veröffentlicht das Angebot — Daten fließen erst nach Vertragsschluss.</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= Dienstleister ================= -->
+  <div id="ansicht-d" hidden>
+    <section class="kachel">
+      <div class="kachel-kopf">
+        <h2>Verfügbare Freigaben</h2>
+        <span class="rechts"><button class="knopf zweit" style="font-size:12.5px;padding:4px 12px" onclick="freigabenLaden()">Aktualisieren</button></span>
+      </div>
+      <div id="d-freigaben"><div class="leer">Katalog wird abgefragt …</div></div>
+    </section>
+
+    <section class="kachel" id="d-datenkachel" hidden>
+      <div class="kachel-kopf">
+        <h2>Empfangene Daten</h2>
+        <span class="pille ok">über den Datenraum</span>
+        <span class="rechts" id="d-abrufstatus"></span>
+      </div>
+      <div class="messkopf">
+        <div class="haupt"><span class="w num" id="d-wind">–,––</span><span class="e">m/s Wind</span></div>
+        <div class="neben">
+          <div class="stat"><span class="w num" id="d-leistung">–</span><span class="l">Leistung kW</span></div>
+          <div class="stat"><span class="w num" id="d-rotor">–</span><span class="l">Rotor rpm</span></div>
+          <div class="stat"><span class="w num" id="d-oel">–</span><span class="l">Getriebeöl °C</span></div>
+          <div class="stat"><span class="w" id="d-status">–</span><span class="l">Status</span></div>
+        </div>
+      </div>
+      <svg class="graph" id="d-graph" viewBox="0 0 1032 210" role="img" aria-label="Empfangene Telemetrie"></svg>
+      <div class="graph-fuss">
+        Jeder Abruf liefert eine Aggregation aus 10 Messungen (~10 s) · Agreement <span class="mono" id="d-agreement">–</span>
+        <button class="knopf leise" style="font-size:12px;padding:2px 10px;margin-left:10px" onclick="gegenprobe()">Gegenprobe ohne Berechtigung</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= Protokoll ================= -->
+  <section class="kachel">
+    <div class="kachel-kopf"><h2>Protokoll</h2></div>
+    <div class="rolle-log mono" id="protokoll"></div>
+  </section>
+
+  <footer>
+    <span><b style="font-weight:600">Wind-X</b> · Forschungsprojekt</span>
+    <span>Demonstrator (Interim)</span>
+    <span>Provider <span class="mono">BPNL00000003AVTH</span> · Consumer <span class="mono">BPNL00000003AWSS</span></span>
+  </footer>
+</div>
+
+<script>
+  // ---------------- Hilfen ----------------
+  function $(id) { return document.getElementById(id); }
+  function fmt(v, n) { var x = parseFloat(v); return isNaN(x) ? '–' : x.toFixed(n).replace('.', ','); }
+  async function api(pfad, methode) {
+    var r = await fetch(pfad, { method: methode || 'GET' });
+    return r.json();
+  }
+
+  // ---------------- Diagramm (dezent: horizontale Hilfslinien, eine Linie) ----------------
+  function zeichne(svgId, werte, spanne) {
+    var svg = $(svgId), W = 1032, H = 210, L = 46, R = 14, T = 12, B = 20;
+    if (!werte.length) { svg.innerHTML = ''; return; }
+    var min = spanne ? spanne[0] : Math.min.apply(null, werte) - 0.15;
+    var max = spanne ? spanne[1] : Math.max.apply(null, werte) + 0.15;
+    if (max - min < 0.5) { var m = (max + min) / 2; min = m - 0.25; max = m + 0.25; }
+    var css = getComputedStyle(document.documentElement);
+    var farbe = css.getPropertyValue('--accent').trim();
+    var linie = css.getPropertyValue('--line').trim();
+    var blass = css.getPropertyValue('--muted').trim();
+    function y(v) { return T + (max - v) / (max - min) * (H - T - B); }
+    var s = '';
+    for (var i = 0; i <= 4; i++) {
+      var v = min + i * (max - min) / 4, gy = y(v);
+      s += '<line x1="' + L + '" y1="' + gy + '" x2="' + (W - R) + '" y2="' + gy + '" stroke="' + linie + '"/>';
+      s += '<text x="' + (L - 8) + '" y="' + (gy + 4) + '" text-anchor="end" font-size="11" fill="' + blass +
+           '" font-family="Consolas,monospace">' + v.toFixed(1) + '</text>';
+    }
+    var n = Math.max(werte.length, 40);
+    var pts = werte.map(function (v, i) {
+      return [(L + i * (W - L - R) / (n - 1)).toFixed(1), y(parseFloat(v)).toFixed(1)];
+    });
+    s += '<polyline points="' + pts.map(function (p) { return p.join(','); }).join(' ') +
+         '" fill="none" stroke="' + farbe + '" stroke-width="2" stroke-linejoin="round"/>';
+    var lp = pts[pts.length - 1];
+    s += '<circle cx="' + lp[0] + '" cy="' + lp[1] + '" r="3.5" fill="' + farbe + '"/>';
+    svg.innerHTML = s;
+  }
+
+  // ---------------- Rollen ----------------
+  function rolle(r) {
+    $('tab-b').classList.toggle('aktiv', r === 'b');
+    $('tab-d').classList.toggle('aktiv', r === 'd');
+    $('ansicht-b').hidden = r !== 'b';
+    $('ansicht-d').hidden = r !== 'd';
+    if (r === 'd') freigabenLaden();
+  }
+
+  // ---------------- Betreiber: Live-Preview (Direktpfad) ----------------
+  async function preview() {
+    try {
+      var p = await api('/api/preview');
+      $('b-pfadstatus').textContent = p.ok ? 'Anlage verbunden' : 'Anlage nicht erreichbar';
+      if (p.punkte.length) {
+        var l = p.punkte[p.punkte.length - 1];
+        $('b-wind').textContent = fmt(l.wind, 2);
+        $('b-leistung').textContent = fmt(l.leistung, 1);
+        $('b-rotor').textContent = fmt(l.rotor, 2);
+        $('b-oel').textContent = fmt(l.oel, 1);
+        $('b-status').textContent = l.laeuft === 'TRUE' ? 'In Betrieb' : 'Stillstand';
+        zeichne('b-graph', p.punkte.map(function (x) { return x.wind; }).slice(-140));
+      }
+    } catch (e) { $('b-pfadstatus').textContent = 'Backend nicht erreichbar'; }
+  }
+
+  async function statusLaden() {
+    try {
+      var s = await api('/api/status');
+      $('b-freigabe-status').innerHTML = s.freigegeben
+        ? '<span class="pille ok">freigegeben</span>'
+        : '<span class="pille warn">nicht freigegeben</span>';
+      $('b-freigeben').disabled = s.freigegeben;
+      $('b-zurueck').disabled = !s.freigegeben;
+    } catch (e) {}
+  }
+  async function freigeben() { await api('/api/freigabe', 'POST'); statusLaden(); }
+  async function zurueckziehen() { await api('/api/zurueckziehen', 'POST'); statusLaden(); }
+
+  // ---------------- Dienstleister ----------------
+  var verbunden = false, abrufAktiv = false;
+  var dWerte = { wind: [], leistung: [], rotor: [], oel: [], laeuft: [] };
+
+  async function freigabenLaden() {
+    var ziel = $('d-freigaben');
+    var f = await api('/api/freigaben');
+    if (!f.ok) { ziel.innerHTML = '<div class="leer">Katalog nicht erreichbar: ' + (f.fehler || '') + '</div>'; return; }
+    if (!f.freigaben.length) {
+      ziel.innerHTML = '<div class="leer">Keine Freigaben vorhanden — der Betreiber hat (noch) nichts freigegeben.</div>';
+      return;
+    }
+    ziel.innerHTML = f.freigaben.map(function (e) {
+      return '<div class="freigabe-eintrag">' +
+        '<div><div class="titel">' + e.name + '</div>' +
+        '<div class="details">Anbieter <span class="mono">' + e.anbieter + '</span> · Bedingung: ' + e.policy +
+        ' · ' + e.transferarten.join(' / ') + '</div></div>' +
+        '<div style="margin-left:auto">' + (verbunden
+          ? '<span class="pille ok">verbunden</span>'
+          : '<button class="knopf" onclick="verbinden()">Verbinden</button>') + '</div></div>';
+    }).join('');
+  }
+
+  async function verbinden() {
+    $('d-freigaben').querySelectorAll('button').forEach(function (b) { b.disabled = true; b.textContent = 'Verhandle …'; });
+    var v = await api('/api/verbinden', 'POST');
+    if (!v.ok) { alert('Verbinden fehlgeschlagen: ' + (v.fehler || '')); freigabenLaden(); return; }
+    verbunden = true;
+    $('d-agreement').textContent = (v.agreement || '').slice(0, 13) + '…';
+    $('d-datenkachel').hidden = false;
+    freigabenLaden();
+    abrufSchleife();
+  }
+
+  async function abrufSchleife() {
+    if (abrufAktiv) return;
+    abrufAktiv = true;
+    while (verbunden) {
+      $('d-abrufstatus').innerHTML = '<span class="laden">Abruf läuft — Data-Plane pollt die Anlage (~10 s) …</span>';
+      try {
+        var d = await api('/api/daten');
+        if (d.ok) {
+          ['wind', 'leistung', 'rotor', 'oel', 'laeuft'].forEach(function (k) {
+            dWerte[k] = dWerte[k].concat(d[k]).slice(-140);
+          });
+          var i = dWerte.wind.length - 1;
+          $('d-wind').textContent = fmt(dWerte.wind[i], 2);
+          $('d-leistung').textContent = fmt(dWerte.leistung[i], 1);
+          $('d-rotor').textContent = fmt(dWerte.rotor[i], 2);
+          $('d-oel').textContent = fmt(dWerte.oel[i], 1);
+          $('d-status').textContent = dWerte.laeuft[i] === 'TRUE' ? 'In Betrieb' : 'Stillstand';
+          zeichne('d-graph', dWerte.wind);
+          $('d-abrufstatus').textContent = 'letzter Abruf: ' + d.dauer + ' s · ' + dWerte.wind.length + ' Werte';
+        } else {
+          $('d-abrufstatus').textContent = 'Abruf fehlgeschlagen: ' + (d.fehler || '');
+          break;
+        }
+      } catch (e) { $('d-abrufstatus').textContent = 'Backend nicht erreichbar'; break; }
+    }
+    abrufAktiv = false;
+  }
+
+  async function gegenprobe() { await api('/api/gegenprobe', 'POST'); }
+
+  // ---------------- Protokoll ----------------
+  async function protokoll() {
+    try {
+      var l = await api('/api/log');
+      $('protokoll').innerHTML = l.zeilen.map(function (z) {
+        return '<span class="t">[' + z.t + ']</span> <span class="' + (z.art || '') + '">' + z.text + '</span>';
+      }).join('\n');
+      $('protokoll').scrollTop = $('protokoll').scrollHeight;
+    } catch (e) {}
+  }
+
+  // ---------------- Start ----------------
+  preview(); statusLaden(); protokoll();
+  setInterval(preview, 1500);
+  setInterval(protokoll, 2000);
+  setInterval(statusLaden, 5000);
+</script>
+</body>
+</html>

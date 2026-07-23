@@ -4,6 +4,7 @@
 **Scope:** Nur Recherche/Plan (kein Code). Ziel: BIBAs **kontinuierlichen** Provider-Push (jede MMS-Aggregation wird
 laufend an eine Ziel-URL gePOSTet) in tractus-x 0.17 umsetzen — via das vorhandene `non-finite-provider-push`-Modul.
 **Status:** ✅ **UMGESETZT & GRÜN (2026-07-07)** — Option A (Standard-`HttpData-PUSH`), s. §8.
+**Update 2026-07-21:** ✅ **Option B umgesetzt** — eigener Transfertyp **`Mms-PUSH`** (`MmsPushSink`, Sink-Typ `Mms`), s. §9.
 
 ---
 
@@ -175,6 +176,52 @@ Boot-Smoke — insb. nachweisen, dass die non-finite-PipelineService die finiten
 - **T3 (voller DCP-Continuous-Push-Transfer)** noch offen: negotiate `HttpData-PUSH` + `isNonFinite`-Asset →
   Provider postet an Consumer-`baseUrl` (WireMock), assert ≥2 POSTs. Bewusst zurückgestellt (Netzwerk zum echten
   MMS-Server aus der Test-Runtime + CI-Hygiene). T1+T2 decken Source und Sink-Mechanik bereits ab.
+
+## 9. ✅ Option B umgesetzt (2026-07-21) — Transfertyp `Mms-PUSH`
+
+**Auslöser:** Die Data-Explorer-UI (Repo des Kollegen) sendet fest `transferType: 'Mms-PUSH'`
+(BIBA-Vorlage) — die Tractus-X-Data-Plane bewarb aber nur `Mms-PULL`/`MmsLight-PULL`/`HttpData-PUSH`,
+weshalb die Diagnose-Station dort abgeschaltet war (`supportsMmsPush: false`).
+
+**Mechanik (am 0.17.0-Bytecode verifiziert, `DataplaneSelfRegistrationExtension`):** beworbene
+Transfertypen = EDR-Destination-Typen × `-PULL` ∪ **`pipelineService.supportedSinkTypes()` × `-PUSH`**.
+`Mms-PUSH` erscheint also genau dann, wenn eine `DataSinkFactory` mit `supportedType()=="Mms"`
+registriert ist. Der Sink-Dispatch zur Laufzeit läuft über **`dataDestination.type`** (nicht über den
+Transfertyp-String) — der Consumer muss deshalb `dataDestination: {type: "Mms", baseUrl: …}` senden.
+
+**Umgesetzt (alles im Modul `windx-mms`, null CP-/Chart-/Config-Änderungen):**
+- **`MmsPushSink`** — der in §3 geplante eigene Sink (BIBA-`MMSPushTask`-treu): eigener
+  Single-Thread-Daemon-Executor pro Instanz, blockierendes `forEach` über den Part-Stream, je
+  Aggregation ein POST (`Content-Type: application/json`) an `dataDestination.baseUrl`.
+  **Kein `ParallelSink`/`asyncAllOf`** → die §8-Restpunkte (dauerhaft blockierter Shared-Executor-Thread
+  + unbegrenzt wachsende Future-Liste) sind damit behoben. Fehlerpolitik: einzelne POST-Fehler
+  (non-2xx, IOException) nur loggen + weiterstreamen — ein failed-Result würde den non-finiten Flow
+  terminal FAILED machen (`NonFiniteCapablePipelineService` komplettiert bei non-finite nur bei Fehler);
+  einziger failed-Pfad ist eine Source, die gar nicht erst aufgeht.
+- **`MmsPushSinkFactory`** — `supportedType()="Mms"` (== `MMS_TRANSFER_DESTINATION_TYPE`),
+  `validateRequest` prüft `baseUrl` (vorhanden + URI mit Schema); `getStringProperty("baseUrl")`
+  löst den JSON-LD-expandierten Key (`edc:baseUrl`) mit Fallback auf den rohen Key auf.
+- Registrierung als 4. Schritt in `WindxMmsDataPlaneExtension.initialize()`. Kommt damit automatisch
+  in `edc-runtime-windx`, `edc-runtime-windx-postgresql`, `edc-dataplane-windx` und die Test-Runtime
+  `runtime-memory-dcp-ih-windx`.
+
+**Kontrakt:** Provider-Asset `type=Mms` + **`edc:isNonFinite=true`** + `mms:*`-Props; Consumer
+`transferType="Mms-PUSH"`, `dataDestination={type:"Mms", baseUrl:"http://…/log?signal=…"}`.
+Ohne `isNonFinite` ist der Push finit (eine Aggregation, dann COMPLETED) — deshalb im Cluster-Seed
+ein **eigenes** Live-Asset `windx-mms-live-1` (`windx-cx-seed.sh` §3d); das PULL-Asset bleibt finit.
+
+**Verifikation:**
+- **`MmsPushSinkTest`** (5 Tests, ohne Netz; JDK-`HttpServer` als Logger-Stub + synthetische unendliche
+  Source): laufende Zustellung mit korrektem Content-Type, `close()` beendet Future + Strom, transienter
+  500er bricht den Strom nicht, Factory-Validierung, und mit echter `NonFiniteCapablePipelineService`:
+  Future bleibt offen, `terminate` stoppt die POSTs. Alle grün.
+- **e2e-Advertising:** `MediatorConsumerPullTest.mmsAsset_offersMmsPullMmsPushAndHttpDataPush` prüft
+  jetzt zusätzlich `Mms-PUSH` in der Katalog-Distribution.
+- **Cluster:** `windx-cx-push-transfer.py` (Muster `windx-cx-mms-transfer.py`) — Katalog → Negotiation →
+  `Mms-PUSH` → STARTED bleibt STARTED, ≥2 Aggregationen landen im Forwarding-Service, Terminate stoppt
+  den Strom. Push-Ziel ist die **Forwarding-Service-Nachbildung** in ns `windx`
+  (`windx-forwarding.py`/`.yaml`/`-deploy.sh`, API-kompatibel zu BIBAs
+  `simple.mms.forwarding.service`: `POST/GET /log?signal=…`, `GET /log/queues`).
 
 ## 7. Quellen (verifiziert, 0.17.0-sources im Gradle-Cache)
 - non-finite: `NonFiniteCapablePipelineService`, `FinitenessEvaluatorImpl`, `FinitenessEvaluator` (Repo).
