@@ -1,0 +1,54 @@
+# Management-APIs der Tractus-X-Connectoren von ausserhalb des Clusters erreichbar machen.
+#
+# WARUM: Der Wind-X Data Explorer (Angular-UI, eigenes Repo) soll zwischen der Eclipse-EDC-Seite
+# und unserem Tractus-X-Stack umschalten koennen. Sein Dev-Server proxyt dafuer auf die
+# Management-APIs -- die liegen aber auf ClusterIP-Services und waeren sonst nur clusterintern
+# erreichbar. Folgt exakt dem Muster, das der bibas-Stack im selben Cluster schon nutzt
+# (bibas-provider-mgmt.tx.test / bibas-consumer-mgmt.tx.test).
+#
+# ACHTUNG -- ungeschuetzte Endpunkte: Die Management-API haengt damit im Uni-Netz. Sie ist zwar
+# durch X-Api-Key geschuetzt, aber der Key ist der Dev-Wert 'password'. Nur fuer den Demonstrator
+# im Forschungscluster gedacht, nichts fuer produktive Umgebungen.
+#
+# Der ingress-nginx-Controller laeuft als DaemonSet mit hostNetwork auf Port 80 jeder Node.
+# Ein hosts-Eintrag ist NICHT noetig, wenn der Aufrufer (wie proxy.conf.json des Data Explorers)
+# die Node-IP direkt anspricht und den Host-Header setzt. Wer die Namen im Browser nutzen will:
+#     10.103.45.212   windx-provider-mgmt.tx.test
+#     10.103.45.212   windx-consumer-mgmt.tx.test
+#
+#   kubectl --context try1 apply -f windx-cx-mgmt-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: windx-provider-mgmt
+  namespace: windx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: windx-provider-mgmt.tx.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: windx-provider-tractusx-connector-controlplane
+                port: { number: 8081 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: windx-consumer-mgmt
+  namespace: windx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: windx-consumer-mgmt.tx.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: windx-consumer-tractusx-connector-controlplane
+                port: { number: 8081 }

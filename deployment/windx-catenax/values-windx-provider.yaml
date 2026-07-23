@@ -1,0 +1,95 @@
+# Wind-X Provider als echter Catena-X-Teilnehmer (Phase 3b).
+#
+# Deployt mit dem OFFIZIELLEN Chart charts/tractusx-connector -- kein Eigenbau-Stack.
+# Control-Plane = unveraendertes Upstream-Image, Data-Plane = Upstream + windx-Extensions.
+# Identitaet kommt vom Wallet-Stub des Umbrella (DID, STS, BDRS, CredentialService in einem).
+#
+#   helm install windx-provider ../../charts/tractusx-connector -n windx --create-namespace \
+#       -f values-windx-provider.yaml
+#
+# Voraussetzung: die BPN ist im Wallet-Stub onboarded -> ./windx-wallet-onboarding.sh
+
+install:
+  postgresql: true   # Asset-Persistenz kommt aus dem Chart
+  vault: true        # HashiCorp-Vault (dev-mode) fuer die Connector-Secrets
+
+# Images liegen in Harbor -> Pull-Secret noetig (im ns windx anzulegen)
+imagePullSecrets:
+  - name: harbor-pull
+
+participant:
+  # DID und BPN, wie sie der Wallet-Stub deterministisch aus der BPN ableitet
+  id: "did:web:ssi-dim-wallet-stub.tx.test:BPNL00000003AVTH"
+  bpnl: "BPNL00000003AVTH"
+  # Pflicht fuer die SQL-Runtime (sonst bricht ConnectorPostgresqlMigration beim Boot ab).
+  # Stabil halten -- "once set, it must never change".
+  contextId: "BPNL00000003AVTH"
+
+dcp:
+  # Das Base-Wallet des Stubs ist der Aussteller aller Credentials
+  trustedIssuers:
+    - "did:web:ssi-dim-wallet-stub.tx.test:BPNL00000003CRHK"
+  sts:
+    div:
+      url: "http://ssi-dim-wallet-stub.tx.test/api/sts"
+    oauth:
+      token_url: "http://ssi-dim-wallet-stub.tx.test/oauth/token"
+      client:
+        id: "BPNL00000003AVTH"
+        # Wert wird unten per vault.server.postStart geseedet
+        secret_alias: "edc-wallet-secret"
+
+controlplane:
+  image:
+    repository: reg.biba.uni-bremen.de/wind-x/windx-edc-controlplane-postgresql-hashicorp-vault
+    tag: "0.13.0-SNAPSHOT"
+  bdrs:
+    server:
+      # Der Wallet-Stub IST der BDRS -- ein separater bdrs-server existiert nicht
+      # (im Umbrella ist bdrs-server-memory bewusst disabled).
+      url: "http://ssi-dim-wallet-stub.tx.test/api/v1/directory"
+  env:
+    # did:web ueber HTTP aufloesen (kein TLS im Cluster) -- kein eigener Chart-Wert dafuer.
+    EDC_IAM_DID_WEB_USE_HTTPS: "false"
+    # tx.edc.iam.dcp.credentialservice.url wird BEWUSST nicht gesetzt: der bdrs-client faellt
+    # auf die CredentialService-URL aus dem DID-Dokument zurueck, und die steht dort korrekt
+    # (http://ssi-dim-wallet-stub.tx.test/api).
+
+dataplane:
+  image:
+    repository: reg.biba.uni-bremen.de/wind-x/windx-edc-dataplane-windx
+    tag: "0.13.0-SNAPSHOT"
+    # SNAPSHOT-Tag wird bei jedem Feature-Nachtrag ueberschrieben (zuletzt: Mms-PUSH) --
+    # ohne Always zieht ein Pod-Neustart das alte Image aus dem Node-Cache.
+    pullPolicy: Always
+  env:
+    EDC_IAM_DID_WEB_USE_HTTPS: "false"
+    # Wind-X-Extensions: der Mediator-Kontext ist ein Pflicht-Setting der Extension.
+    # Im K3s laeuft (noch) kein Semantic Mediator -> Platzhalter; MMS-Transfers brauchen ihn nicht.
+    TX_EDC_WINDX_MEDIATOR_BASE_URL: "http://localhost:3051"
+    WEB_HTTP_MED_PORT: "8087"
+    WEB_HTTP_MED_PATH: "/api/med"
+    EDC_DATAPLANE_WINDX_MED_ENDPOINT: "http://windx-provider-tractusx-connector-dataplane:8087/api/med"
+  # Schluessel, mit dem die Data-Plane die Zugriffstoken (EDR) signiert. Das Chart laesst hier
+  # "CHANGEME" stehen -- damit scheitert JEDER Transfer ("JWSSigner cannot be generated for
+  # private key 'CHANGEME'"), obwohl die Negotiation noch FINALIZED wird.
+  # Das Schluesselmaterial erzeugt ./windx-cx-dataplane-keys.sh in ein separates values-Overlay.
+  token:
+    signer:
+      privatekey_alias: "windx-dp-signer-private"
+    verifier:
+      publickey_alias: "windx-dp-signer-public"
+
+vault:
+  server:
+    # Seedet die Connector-Secrets in den frisch gestarteten Vault.
+    # client-secret-Wert = die BPN selbst (so gibt der Stub es im DID-Dokument aus:
+    # "clientID":"BPNL...","clientSecret":"BPNL..."). Der Stub prueft es ohnehin nicht streng.
+    postStart:
+      - sh
+      - -c
+      - |-
+        {
+        sleep 5
+        /bin/vault kv put secret/edc-wallet-secret content=BPNL00000003AVTH
+        }
