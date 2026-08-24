@@ -1,0 +1,140 @@
+#################################################################################
+#  Copyright (c) 2026 Contributors to the Eclipse Foundation
+#
+#  See the NOTICE file(s) distributed with this work for additional
+#  information regarding copyright ownership.
+#
+#  This program and the accompanying materials are made available under the
+#  terms of the Apache License, Version 2.0 which is available at
+#  https://www.apache.org/licenses/LICENSE-2.0.
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#  License for the specific language governing permissions and limitations
+#  under the License.
+#
+#  SPDX-License-Identifier: Apache-2.0
+#################################################################################
+
+
+---
+name: "Build and publish Docker images to GHCR"
+run-name: "Build and publish Docker images to GHCR from ${{ github.ref_name }}"
+
+on:
+  # Automatischer Build bei jedem Push auf main, auf den Rebase-Branches und bei Tags.
+  # Nur main setzt zusaetzlich den 'latest'-Tag (siehe is_default_branch weiter unten), ein
+  # Branch-Build veroeffentlicht also unter seinem Branchnamen und ueberschreibt nichts.
+  push:
+    branches:
+      - main
+      - "windx-on-tractusx-*"
+    tags:
+      - "v*"
+  # Manueller Start ueber die Actions-UI
+  workflow_dispatch:
+    inputs:
+      docker_tag:
+        description: "Optionaler zusaetzlicher Docker-Tag (SHA und latest werden automatisch gesetzt)"
+        required: false
+        type: string
+
+# GHCR-Registry: das Image landet unter ghcr.io/<owner>/<imagename>
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: "Build & push ${{ matrix.variant.img }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # noetig fuer den Push nach GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        # Hier weitere Images einfach ergaenzen (dir = Verzeichnis, img = Modul-/Imagename)
+        variant:
+          - { dir: edc-controlplane, img: edc-controlplane-postgresql-hashicorp-vault }
+          - { dir: edc-dataplane,    img: edc-dataplane-windx }
+          # - { dir: edc-controlplane, img: edc-runtime-memory }
+          # - { dir: edc-dataplane,    img: edc-dataplane-hashicorp-vault }
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      ###############################################
+      # Cross-arch Builds (amd64 + arm64)
+      ###############################################
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      #####################
+      # Login bei GHCR
+      #####################
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      #####################
+      # JAR bauen
+      #####################
+      - uses: ./.github/actions/setup-java
+      - name: Build ${{ matrix.variant.img }} (shadowJar)
+        shell: bash
+        env:
+          ROOT_DIR: ${{ matrix.variant.dir }}/${{ matrix.variant.img }}
+        run: ./gradlew -p "$ROOT_DIR" shadowJar
+
+      ###############################
+      # Docker-Metadaten / Tags
+      ###############################
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.variant.img }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ inputs.docker_tag }},enable=${{ inputs.docker_tag != '' }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      ###############################
+      # Image bauen und pushen
+      ###############################
+      - name: Build and push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        env:
+          ROOT_DIR: ${{ matrix.variant.dir }}/${{ matrix.variant.img }}
+          IMAGE_NAME: ${{ matrix.variant.img }}
+        with:
+          context: ${{ env.ROOT_DIR }}
+          file: ${{ env.ROOT_DIR }}/build/resources/docker/Dockerfile
+          build-args: |
+            JAR=build/libs/${{ env.IMAGE_NAME }}.jar
+            OTEL_JAR=build/resources/otel/opentelemetry-javaagent.jar
+            ADDITIONAL_FILES=build/legal/*
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

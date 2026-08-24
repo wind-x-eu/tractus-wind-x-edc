@@ -1,0 +1,73 @@
+# Wind-X Demonstrator-Dashboard (Interim, Phase 6) -- Deployment + Service.
+# Der Code kommt aus der ConfigMap windx-dashboard (windx-cx-dashboard-deploy.sh erzeugt sie
+# aus windx-cx-dashboard.py/.html) -- kein Image-Build noetig, python:3.12-alpine genuegt.
+#
+# Zugriff:  kubectl --context try1 -n windx port-forward svc/windx-dashboard 8090:80
+#           -> http://localhost:8090
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: windx-dashboard
+  namespace: windx
+  labels: { app: windx-dashboard }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: windx-dashboard }
+  template:
+    metadata:
+      labels: { app: windx-dashboard }
+    spec:
+      containers:
+        - name: dashboard
+          image: python:3.12-alpine
+          command: ["python3", "/app/dashboard.py"]
+          ports:
+            - containerPort: 8090
+          volumeMounts:
+            - { name: code, mountPath: /app }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /api/status, port: 8090 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: code
+          configMap:
+            name: windx-dashboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: windx-dashboard
+  namespace: windx
+  labels: { app: windx-dashboard }
+spec:
+  selector: { app: windx-dashboard }
+  ports:
+    - { name: http, port: 80, targetPort: 8090 }
+---
+# Erreichbar ueber http://windx-demo.tx.test (statt port-forward). Folgt dem bestehenden
+# .tx.test-Muster im Cluster (vgl. iecsim.tx.test, ssi-dim-wallet-stub.tx.test): der
+# ingress-nginx-Controller laeuft als DaemonSet mit hostNetwork auf Port 80 jeder Node.
+# hosts-Eintrag (Windows: C:\Windows\System32\drivers\etc\hosts):
+#     10.103.45.212   windx-demo.tx.test
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: windx-dashboard
+  namespace: windx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: windx-demo.tx.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: windx-dashboard
+                port: { number: 80 }

@@ -125,6 +125,12 @@ include(":edc-extensions:agreements-bpns:bpns-evaluation-spi")
 include(":edc-extensions:token-interceptor")
 include(":edc-extensions:single-participant-vault")
 
+// Wind-X-Fachlogik. Reine Data-Plane-Extensions, die Control-Plane bleibt unveraendertes Upstream.
+include(":edc-extensions:windx:windx-participant-log")
+include(":edc-extensions:windx:windx-mediator-proxy")
+include(":edc-extensions:windx:windx-mms")
+include(":edc-extensions:windx:windx-bdrs-static")
+
 // test modules
 include(":edc-tests:e2e-fixtures")
 include(":edc-tests:e2e:bpn-event-tests")
@@ -169,5 +175,6 @@ include(":edc-controlplane:edc-controlplane-postgresql-hashicorp-vault")
 include(":edc-dataplane")
 include(":edc-dataplane:edc-dataplane-base")
 include(":edc-dataplane:edc-dataplane-hashicorp-vault")
+include(":edc-dataplane:edc-dataplane-windx")
 
 include(":samples:testing-with-mocked-connector")
