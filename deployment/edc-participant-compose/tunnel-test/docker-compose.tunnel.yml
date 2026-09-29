@@ -1,0 +1,30 @@
+# =============================================================================
+# Ergaenzung zu ../docker-compose.yml fuer einen Onboarding-Test vom eigenen
+# Rechner aus: ein Cloudflare Quick Tunnel gibt dem lokalen Stack voruebergehend
+# einen oeffentlichen HTTPS-Namen (https://<zufall>.trycloudflare.com) mit
+# gueltigem Zertifikat -- ohne Konto, ohne DNS, ohne Portfreigabe.
+#
+# Nicht direkt aufrufen, sondern ueber ./start.sh (setzt PUBLIC_HOST auf den
+# Tunnelnamen, BEVOR die Identitaet angelegt wird).
+#
+#   docker compose -p edctunnel --env-file tunnel-test/.env.tunnel \
+#     -f docker-compose.yml -f tunnel-test/docker-compose.tunnel.yml ...
+#
+# Pfade sind relativ zum Projektordner (= Ordner von ../docker-compose.yml).
+# =============================================================================
+services:
+
+  # Ausgehende Verbindung zu Cloudflare; eingehende Anfragen an den Tunnelnamen
+  # landen beim Caddy-Proxy. TLS endet bei Cloudflare, dahinter reicht HTTP.
+  tunnel:
+    image: cloudflare/cloudflared:2024.12.2
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--url", "http://proxy:80"]
+
+  # Eigenes Caddyfile: setzt den Host-Header fest auf den Tunnelnamen -- der
+  # IdentityHub liefert das DID-Dokument nur fuer den Host aus, der in der DID steht.
+  proxy:
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./tunnel-test/Caddyfile:/etc/caddy/Caddyfile:ro

@@ -1,0 +1,4 @@
+# Alles hier laeuft in Linux-Containern bzw. in bash: immer LF, auch bei
+# core.autocrlf=true unter Windows (CRLF bricht sh-Skripte und Caddyfile).
+* text=auto eol=lf
+*.crt text eol=lf

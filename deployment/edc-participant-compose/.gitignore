@@ -1,0 +1,4 @@
+# enthalten Geheimnisse (VAULT_TOKEN, MGMT_KEY, SUPERUSER_KEY, POSTGRES_PASSWORD)
+.env
+.env.*
+!.env.example

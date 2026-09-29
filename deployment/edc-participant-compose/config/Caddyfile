@@ -1,0 +1,23 @@
+# Die vier oeffentlichen Datenraum-Pfade -- alles andere 404.
+# Caddy reicht den Host-Header unveraendert durch; der IdentityHub liefert das
+# DID-Dokument anhand genau dieses Hosts aus (did:web:<host>).
+{$SITE_ADDRESS} {
+	handle /.well-known/did.json {
+		reverse_proxy identityhub:8084
+	}
+	handle /api/credentials/* {
+		reverse_proxy identityhub:8083
+	}
+	handle /api/v1/dsp* {
+		reverse_proxy controlplane:8084
+	}
+	handle /api/public* {
+		# fortlaufende Datenstroeme nicht puffern
+		reverse_proxy dataplane:8081 {
+			flush_interval -1
+		}
+	}
+	handle {
+		respond 404
+	}
+}

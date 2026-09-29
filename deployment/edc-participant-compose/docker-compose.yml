@@ -1,0 +1,298 @@
+# =============================================================================
+# Wind-X-Teilnehmer im SWMS-Datenraum -- Docker Compose (ohne Kubernetes).
+#
+# Die Umgebungsvariablen von Control-Plane, Data-Plane und IdentityHub sind 1:1
+# aus den gerenderten Helm-Charts (tractusx-connector 0.12.1, tractusx-identityhub
+# v0.3.2) uebernommen; Vault, Postgres, Vault-Sicherung und Participant-
+# Provisionierung entsprechen dem Kubernetes-Deployment eines Teilnehmers.
+#
+#   cp .env.example .env      # PUBLIC_HOST, BPN, SITE_ADDRESS eintragen
+#   docker login ghcr.io      # private Wind-X-Images
+#   docker compose up -d
+#
+# Geheimnisse muss niemand anlegen: der Dienst "secrets" erzeugt sie beim ersten
+# Start im Volume "secrets"; alle Dienste lesen sie von dort. Management-Key:
+#   docker compose exec controlplane sh -c 'cat /secrets/mgmt_key'
+#
+# Oeffentlich (ueber den proxy) sind NUR die vier Datenraum-Pfade; die
+# Management-API bindet an ${MGMT_BIND} (Standard: nur localhost).
+# =============================================================================
+
+x-vault: &vault-env
+  EDC_VAULT_HASHICORP_URL: http://vault:8200
+  EDC_VAULT_HASHICORP_TIMEOUT_SECONDS: "30"
+  EDC_VAULT_HASHICORP_HEALTH_CHECK_ENABLED: "true"
+  EDC_VAULT_HASHICORP_HEALTH_CHECK_STANDBY_OK: "true"
+  EDC_VAULT_HASHICORP_API_SECRET_PATH: /v1/secret
+  EDC_VAULT_HASHICORP_API_HEALTH_CHECK_PATH: /v1/sys/health
+
+x-db: &db-env
+  EDC_DATASOURCE_DEFAULT_USER: edc
+  EDC_DATASOURCE_DEFAULT_URL: jdbc:postgresql://postgres:5432/edc
+
+# Java-Dienste starten ueber scripts/start-java.sh: Geheimnisse aus /secrets in
+# eine EDC-Konfigurationsdatei, dann derselbe java-Aufruf wie im Image.
+
+x-sts: &sts-env
+  EDC_IAM_STS_OAUTH_TOKEN_URL: http://identityhub:8087/api/sts/token
+  EDC_IAM_STS_OAUTH_CLIENT_ID: did:web:${PUBLIC_HOST:?}
+  EDC_IAM_STS_OAUTH_CLIENT_SECRET_ALIAS: did:web:${PUBLIC_HOST}-sts-client-secret
+
+services:
+
+  # Erzeugt beim ERSTEN Start vault_token, mgmt_key, superuser_key und
+  # postgres_password im Volume "secrets"; spaeter bleibt alles unveraendert.
+  secrets:
+    image: curlimages/curl:8.10.1
+    user: "0"
+    restart: "no"
+    entrypoint: ["/bin/sh", "/scripts/gen-secrets.sh"]
+    volumes:
+      - ./scripts:/scripts:ro
+      - secrets:/secrets
+
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    depends_on:
+      secrets: { condition: service_completed_successfully }
+    environment:
+      POSTGRES_USER: edc
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
+      POSTGRES_DB: edc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./config/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - secrets:/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edc -d edc && psql -U edc -d ih -c 'select 1' >/dev/null"]
+      interval: 5s
+      retries: 30
+
+  # Dev-Modus = In-Memory. Dauerhaft wird er erst durch vault-keeper (Sicherung
+  # auf ein Volume, Rueckspielen nach jedem Neustart) -- genau wie im Cluster.
+  vault:
+    image: hashicorp/vault:1.17
+    restart: unless-stopped
+    depends_on:
+      secrets: { condition: service_completed_successfully }
+    entrypoint:
+      - /bin/sh
+      - -c
+      - VAULT_DEV_ROOT_TOKEN_ID="$$(cat /secrets/vault_token)" exec docker-entrypoint.sh server -dev -dev-listen-address=0.0.0.0:8200
+    volumes:
+      - secrets:/secrets:ro
+    cap_add: [IPC_LOCK]
+
+  # Setzt beim ersten Start den Superuser-Key (Identity-API authentifiziert ueber
+  # den Vault-Alias "sup3r$3cr3t"), spielt nach einem Neustart die Sicherung
+  # zurueck und sichert danach alle 30 s. "healthy" = Vault ist befuellt.
+  vault-keeper:
+    image: curlimages/curl:8.10.1
+    restart: unless-stopped
+    user: "0"
+    entrypoint: ["/bin/sh", "/scripts/vault-keeper.sh"]
+    volumes:
+      - ./scripts:/scripts:ro
+      - secrets:/secrets:ro
+      - vaultbackup:/backup
+    depends_on: [vault]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 3s
+      retries: 60
+
+  identityhub:
+    image: ${IH_IMAGE:-tractusx/identityhub:0.3.2}
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      vault-keeper: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "/scripts/start-java.sh"]
+    volumes:
+      - ./config/ih-logging.properties:/app/logging.properties:ro
+      - ./scripts:/scripts:ro
+      - secrets:/secrets:ro
+    # logging.properties schreibt zusaetzlich nach /app/logs (im Cluster ein emptyDir)
+    tmpfs:
+      - /app/logs:mode=1777
+    environment:
+      <<: *vault-env
+      ROLE: identityhub
+      EDC_IAM_ACCESSTOKEN_JTI_VALIDATION: "true"
+      EDC_IAM_STS_PRIVATEKEY_ALIAS: did:web:${PUBLIC_HOST}#signing-key-1
+      EDC_IAM_STS_PUBLICKEY_ID: did:web:${PUBLIC_HOST}#signing-key-1
+      EDC_IH_IAM_ID: did:web:${PUBLIC_HOST}
+      # --- ConfigMap <p>-ih-config
+      web.http.port: "8081"
+      web.http.path: /api
+      web.http.identity.port: "8082"
+      web.http.identity.path: /api/identity
+      web.http.identity.auth.alias: sup3r$$3cr3t
+      web.http.credentials.port: "8083"
+      web.http.credentials.path: /api/credentials
+      web.http.did.port: "8084"
+      web.http.did.path: /
+      web.http.accounts.port: "8085"
+      web.http.accounts.path: /api/accounts
+      web.http.version.port: "8086"
+      web.http.version.path: /.well-known/api
+      web.http.sts.port: "8087"
+      web.http.sts.path: /api/sts
+      edc.tractusx.ih.participant.configurable.enable: "false"
+      edc.iam.did.web.use.https: "true"
+      edc.iam.credential.revocation.mimetype: "*/*"
+      edc.encryption.strict: "false"
+      # --- ConfigMap <p>-ih-datasource-config (alle Stores in DB "ih"; die
+      #     Passwoerter setzt scripts/start-java.sh aus /secrets)
+      edc.sql.store.participantcontext.datasource: participantcontext
+      edc.datasource.participantcontext.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.participantcontext.user: edc
+      edc.sql.store.keypair.datasource: keypair
+      edc.datasource.keypair.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.keypair.user: edc
+      edc.sql.store.didresource.datasource: didresource
+      edc.datasource.didresource.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.didresource.user: edc
+      edc.sql.store.stsclient.datasource: stsclient
+      edc.datasource.stsclient.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.stsclient.user: edc
+      edc.sql.store.credentialrequest.datasource: credentialrequest
+      edc.datasource.credentialrequest.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.credentialrequest.user: edc
+      edc.sql.store.credentials.datasource: credentials
+      edc.datasource.credentials.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.credentials.user: edc
+      edc.sql.store.jti.datasource: jti
+      edc.datasource.jti.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.jti.user: edc
+      edc.sql.store.participantcontextconfig.datasource: participantcontextconfig
+      edc.datasource.participantcontextconfig.url: jdbc:postgresql://postgres:5432/ih
+      edc.datasource.participantcontextconfig.user: edc
+
+  # Deploy-Schritt 5: Participant Context anlegen -- Schluesselpaar, STS-Konto,
+  # DID-Dokument. Idempotent: existiert er schon, bleibt alles unveraendert
+  # (KEIN neuer Schluessel). Laeuft einmal und beendet sich.
+  ih-provision:
+    image: curlimages/curl:8.10.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "/scripts/ih-provision.sh"]
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./scripts:/scripts:ro
+      - secrets:/secrets:ro
+    depends_on: [identityhub]
+
+  controlplane:
+    image: ${CP_IMAGE:-ghcr.io/wind-x-eu/edc-controlplane-postgresql-hashicorp-vault}:${IMAGE_TAG:-sha-9f724fe}
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/scripts/start-java.sh"]
+    command: ["--log-level=${LOG_LEVEL:-INFO}"]
+    depends_on:
+      ih-provision: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+    ports:
+      - "${MGMT_BIND:-127.0.0.1:18081}:8081"      # Management-API, NICHT oeffentlich
+    volumes:
+      - ./config/opentelemetry-controlplane.properties:/app/opentelemetry.properties:ro
+      - ./config/log4j2.yaml:/app/log4j2.yaml:ro
+      - ./scripts:/scripts:ro
+      - secrets:/secrets:ro
+    environment:
+      <<: [*vault-env, *db-env, *sts-env]
+      ROLE: controlplane
+      EDC_PARTICIPANT_ID: did:web:${PUBLIC_HOST}
+      EDC_IAM_ISSUER_ID: did:web:${PUBLIC_HOST}
+      EDC_PARTICIPANT_CONTEXT_ID: did:web:${PUBLIC_HOST}
+      TRACTUSX_EDC_PARTICIPANT_BPN: ${BPN:?}
+      LOG4J_CONFIGURATION_FILE: /app/log4j2.yaml
+      WEB_HTTP_MANAGEMENT_AUTH_TYPE: tokenbased
+      WEB_HTTP_PORT: "8080"
+      WEB_HTTP_PATH: /api
+      WEB_HTTP_MANAGEMENT_PORT: "8081"
+      WEB_HTTP_MANAGEMENT_PATH: /management
+      WEB_HTTP_CONTROL_PORT: "8083"
+      WEB_HTTP_CONTROL_PATH: /control
+      WEB_HTTP_PROTOCOL_PORT: "8084"
+      WEB_HTTP_PROTOCOL_PATH: /api/v1/dsp
+      EDC_CONTROL_ENDPOINT: http://controlplane:8083/control
+      WEB_HTTP_CATALOG_PORT: "8085"
+      WEB_HTTP_CATALOG_PATH: /catalog
+      WEB_HTTP_CATALOG_AUTH_TYPE: tokenbased
+      # Callback-Adresse: oeffentlich und HTTPS -- Gegenstellen antworten hierhin.
+      EDC_DSP_CALLBACK_ADDRESS: https://${PUBLIC_HOST}/api/v1/dsp
+      EDC_OAUTH_PROVIDER_AUDIENCE: idsc:IDS_CONNECTORS_ALL
+      EDC_OAUTH_ENDPOINT_AUDIENCE: https://${PUBLIC_HOST}/api/v1/dsp
+      # SWMS: einziger Aussteller, ALLE drei Typen (sonst 401 ueber DSP 2025-1).
+      EDC_IAM_TRUSTED-ISSUER_0-ISSUER_ID: ${OPERATOR_DID:?}
+      EDC_IAM_TRUSTED-ISSUER_0-ISSUER_SUPPORTEDTYPES: '["MembershipCredential","BpnCredential","DataExchangeGovernanceCredential"]'
+      TX_EDC_DID_SERVICE_SELF_REGISTRATION_ENABLED: "false"
+      TX_EDC_DID_SERVICE_SELF_DEREGISTRATION_ENABLED: "true"
+      TX_EDC_DCP_CACHE_ENABLED: "true"
+      TX_EDC_DCP_CACHE_VALIDITY_SECONDS: "86400"
+      TX_EDC_IAM_IATP_BDRS_SERVER_URL: ${BDRS_URL:?}
+      TX_EDC_IAM_IATP_BDRS_CACHE_VALIDITY: "600"
+      EDC_CATALOG_CACHE_EXECUTION_ENABLED: "false"
+      EDC_POLICY_VALIDATION_ENABLED: "true"
+      EDC_RUNTIME_ID: controlplane
+      EDC_IAM_DID_WEB_USE_HTTPS: "true"
+
+  dataplane:
+    image: ${DP_IMAGE:-ghcr.io/wind-x-eu/edc-dataplane-windx}:${IMAGE_TAG:-sha-9f724fe}
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/scripts/start-java.sh"]
+    command: ["--log-level=${LOG_LEVEL:-INFO}"]
+    depends_on: [controlplane]
+    volumes:
+      - ./config/opentelemetry-dataplane.properties:/app/opentelemetry.properties:ro
+      - ./config/log4j2.yaml:/app/log4j2.yaml:ro
+      - ./scripts:/scripts:ro
+      - secrets:/secrets:ro
+    environment:
+      <<: [*vault-env, *db-env, *sts-env]
+      ROLE: dataplane
+      EDC_PARTICIPANT_ID: ${BPN}
+      EDC_PARTICIPANT_CONTEXT_ID: did:web:${PUBLIC_HOST}
+      EDC_IAM_ISSUER_ID: did:web:${PUBLIC_HOST}
+      LOG4J_CONFIGURATION_FILE: /app/log4j2.yaml
+      WEB_HTTP_PORT: "8080"
+      WEB_HTTP_PATH: /api
+      WEB_HTTP_CONTROL_PORT: "8084"
+      WEB_HTTP_CONTROL_PATH: /api/control
+      WEB_HTTP_PUBLIC_PORT: "8081"
+      WEB_HTTP_PUBLIC_PATH: /api/public
+      EDC_CONTROL_ENDPOINT: http://dataplane:8084/api/control
+      EDC_DPF_SELECTOR_URL: http://controlplane:8083/control/v1/dataplanes
+      # Public-URL: landet als "endpoint" in jeder EDR -- oeffentlich und HTTPS.
+      EDC_DATAPLANE_API_PUBLIC_BASEURL: https://${PUBLIC_HOST}/api/public
+      TX_EDC_DATAPLANE_TOKEN_EXPIRY: "300"
+      TX_EDC_DATAPLANE_TOKEN_EXPIRY_TOLERANCE: "10"
+      TX_EDC_DATAPLANE_TOKEN_REFRESH_ENDPOINT: https://${PUBLIC_HOST}/api/public/token
+      EDC_TRANSFER_PROXY_TOKEN_SIGNER_PRIVATEKEY_ALIAS: did:web:${PUBLIC_HOST}#signing-key-1
+      EDC_TRANSFER_PROXY_TOKEN_VERIFIER_PUBLICKEY_ALIAS: did:web:${PUBLIC_HOST}#signing-key-1
+      EDC_RUNTIME_ID: dataplane
+      EDC_IAM_DID_WEB_USE_HTTPS: "true"
+      TX_EDC_WINDX_MEDIATOR_BASE_URL: ${MEDIATOR_BASE_URL:-http://semanticmediator:3051}
+
+  # Die vier oeffentlichen Pfade unter EINEM Namen. SITE_ADDRESS steuert TLS:
+  #   edc.partner.example          -> Caddy holt Let's-Encrypt-Zertifikat (Ports 80+443 oeffentlich)
+  #   http://edc.partner.example   -> nur HTTP, TLS endet an einem vorgelagerten Proxy
+  proxy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on: [identityhub, controlplane, dataplane]
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?}
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+
+volumes:
+  secrets:        # die vier Geheimnisse -- zusammen mit pgdata und vaultbackup DIE Identitaet
+  pgdata:
+  vaultbackup:
+  caddydata:
