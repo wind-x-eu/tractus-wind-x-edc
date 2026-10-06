@@ -1,0 +1,17 @@
+# Copy this file to values-windx.yaml, replace the participant-specific values,
+# and keep values-windx.yaml out of version control if it contains local settings.
+namespace: edc-participant
+
+participant:
+  publicHost: edc.partner.example
+  bpn: BPNL000000000000
+  operatorDid: did:web:auth-windx.cluster.swms-cloud.com
+  bdrsUrl: https://auth-windx.cluster.swms-cloud.com/api/directory
+  mediatorBaseUrl: http://semanticmediator:3051
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true
+    secretName: edc-participant-tls

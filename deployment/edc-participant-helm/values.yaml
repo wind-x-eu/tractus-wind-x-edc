@@ -1,0 +1,88 @@
+namespace: edc-participant
+
+participant:
+  # This hostname becomes did:web:<publicHost>. Keep it stable for the life of the participant.
+  publicHost: edc.partner.example
+  bpn: BPNLCHANGEME
+  operatorDid: did:web:auth-windx.cluster.swms-cloud.com
+  bdrsUrl: https://auth-windx.cluster.swms-cloud.com/api/directory
+  mediatorBaseUrl: http://semanticmediator:3051
+
+secrets:
+  name: edc-participant-secrets
+  keys:
+    postgresPassword: postgres-password
+    vaultToken: vault-token
+    superuserKey: superuser-key
+    managementKey: management-key
+
+postgresql:
+  # When enabled, this single-replica PostgreSQL instance creates `edc` and `ih`.
+  # For production HA, set enabled=false and use a managed/operator PostgreSQL service;
+  # create both databases and grant the configured user access before installation.
+  enabled: true
+  image: postgres:16.4-alpine
+  serviceName: postgres
+  host: postgres
+  port: 5432
+  username: edc
+  defaultDatabase: edc
+  identityHubDatabase: ih
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+vault:
+  # Point this at a persistent, initialized Vault with a KV v2 mount named `secret`.
+  # The token in secrets.name must be scoped to this participant's secret paths.
+  url: http://vault:8200
+  kvV2DataPath: secret/data
+  secretApiPath: /v1/secret
+  healthApiPath: /v1/sys/health
+  bootstrap:
+    enabled: true
+    image: curlimages/curl:8.10.1
+
+identityhub:
+  image:
+    repository: tractusx/identityhub
+    tag: 0.3.2
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  serviceName: identityhub
+  logInitImage: busybox:1.36.1
+  provision:
+    enabled: true
+    image: curlimages/curl:8.10.1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+connector:
+  releaseName: windx-connector
+  fullnameOverride: windx-connector
+  imagePullSecret: ghcr-pull-secret
+
+ingress:
+  enabled: false
+  className: nginx
+  tls:
+    enabled: true
+    secretName: edc-participant-tls
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"

@@ -174,7 +174,14 @@ spec:
               value: "delegated"
             {{- else }}
             - name: "WEB_HTTP_MANAGEMENT_AUTH_KEY"
+              {{ if .Values.controlplane.endpoints.management.authKeySecret.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controlplane.endpoints.management.authKeySecret.name | quote }}
+                  key: {{ .Values.controlplane.endpoints.management.authKeySecret.key | default "management-key" | quote }}
+              {{ else }}
               value: {{ .Values.controlplane.endpoints.management.authKey | required ".Values.controlplane.endpoints.management.authKey is required" | quote }}
+              {{ end }}
             - name: "WEB_HTTP_MANAGEMENT_AUTH_TYPE"
               value: "tokenbased"
             {{- end }}
@@ -218,7 +225,14 @@ spec:
             - name: "EDC_DATASOURCE_DEFAULT_USER"
               value: {{ .Values.postgresql.auth.username | required ".Values.postgresql.auth.username is required" | quote }}
             - name: "EDC_DATASOURCE_DEFAULT_PASSWORD"
+              {{ if .Values.postgresql.auth.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.auth.existingSecret | quote }}
+                  key: {{ .Values.postgresql.auth.secretKeys.adminPasswordKey | default "postgres-password" | quote }}
+              {{ else }}
               value: {{ .Values.postgresql.auth.password | required ".Values.postgresql.auth.password is required" | quote }}
+              {{ end }}
             - name: "EDC_DATASOURCE_DEFAULT_URL"
               value: {{ tpl .Values.postgresql.jdbcUrl . | quote }}
             {{- else }}
@@ -316,10 +330,10 @@ spec:
             ## BDRS CLIENT ##
             #################
 
-            - name: "TX_EDC_IAM_DCP_BDRS_SERVER_URL"
+            - name: {{ .Values.controlplane.bdrs.server.environmentVariable | default "TX_EDC_IAM_DCP_BDRS_SERVER_URL" | quote }}
               value: {{ .Values.controlplane.bdrs.server.url | required ".Values.controlplane.bdrs.server.url is required" | quote }}
             {{- if .Values.controlplane.bdrs.cache_validity_seconds }}
-            - name: "TX_EDC_IAM_DCP_BDRS_CACHE_VALIDITY"
+            - name: {{ .Values.controlplane.bdrs.cacheValidityEnvironmentVariable | default "TX_EDC_IAM_DCP_BDRS_CACHE_VALIDITY" | quote }}
               value: {{ .Values.controlplane.bdrs.cache_validity_seconds | quote}}
             {{- end}}
 
@@ -331,7 +345,14 @@ spec:
             - name: "EDC_VAULT_HASHICORP_URL"
               value: {{ tpl .Values.vault.hashicorp.url . | quote }}
             - name: "EDC_VAULT_HASHICORP_TOKEN"
+              {{ if .Values.vault.hashicorp.tokenSecret.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vault.hashicorp.tokenSecret.name | quote }}
+                  key: {{ .Values.vault.hashicorp.tokenSecret.key | default "vault-token" | quote }}
+              {{ else }}
               value: {{ .Values.vault.hashicorp.token | required ".Values.vault.hashicorp.token is required" | quote }}
+              {{ end }}
             - name: "EDC_VAULT_HASHICORP_TIMEOUT_SECONDS"
               value: {{ .Values.vault.hashicorp.timeout | quote }}
             - name: "EDC_VAULT_HASHICORP_HEALTH_CHECK_ENABLED"

@@ -1,6 +1,6 @@
 # tractusx-connector
 
-![Version: 0.13.0-SNAPSHOT](https://img.shields.io/badge/Version-0.13.0--SNAPSHOT-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.13.0-SNAPSHOT](https://img.shields.io/badge/AppVersion-0.13.0--SNAPSHOT-informational?style=flat-square)
+![Version: 0.13.1-SNAPSHOT](https://img.shields.io/badge/Version-0.13.1--SNAPSHOT-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.13.0-SNAPSHOT](https://img.shields.io/badge/AppVersion-0.13.0--SNAPSHOT-informational?style=flat-square)
 
 A Helm chart for Tractus-X Eclipse Data Space Connector. The connector deployment consists of two runtime consists of a
 Control Plane and a Data Plane. Note that _no_ external dependencies such as a PostgreSQL database and HashiCorp Vault are included.
@@ -128,6 +128,8 @@ helm install my-release tractusx-edc/tractusx-connector --version 0.13.0-SNAPSHO
 | controlplane.autoscaling.targetCPUUtilizationPercentage | int | `80` | targetAverageUtilization of cpu provided to a pod |
 | controlplane.autoscaling.targetMemoryUtilizationPercentage | int | `80` | targetAverageUtilization of memory provided to a pod |
 | controlplane.bdrs.cache_validity_seconds | int | `600` | Time that a cached BPN/DID resolution map is valid in seconds, default is 600 seconds (10 min) |
+| controlplane.bdrs.cacheValidityEnvironmentVariable | string | `"TX_EDC_IAM_DCP_BDRS_CACHE_VALIDITY"` | Environment variable used for BDRS cache validity |
+| controlplane.bdrs.server.environmentVariable | string | `"TX_EDC_IAM_DCP_BDRS_SERVER_URL"` | Environment variable used for the BDRS URL (Wind-X images may use the IATP name) |
 | controlplane.bdrs.server.url | string | `"CHANGEME"` | URL of the BPN/DID Resolution Service |
 | controlplane.debug.enabled | bool | `false` | Enables java debugging mode. |
 | controlplane.debug.port | int | `1044` | Port where the debuggee can connect to. |
@@ -139,8 +141,9 @@ helm install my-release tractusx-edc/tractusx-connector --version 0.13.0-SNAPSHO
 | controlplane.endpoints.default | object | `{"path":"/api","port":8080}` | default api for health checks, should not be added to any ingress |
 | controlplane.endpoints.default.path | string | `"/api"` | path for incoming api calls |
 | controlplane.endpoints.default.port | int | `8080` | port for incoming api calls |
-| controlplane.endpoints.management | object | `{"authKey":"password","jwksUrl":null,"path":"/management","port":8081}` | data management api, used by internal users, can be added to an ingress and must not be internet facing |
+| controlplane.endpoints.management | object | `{"authKey":"password","authKeySecret":{},"jwksUrl":null,"path":"/management","port":8081}` | data management api, used by internal users, can be added to an ingress and must not be internet facing |
 | controlplane.endpoints.management.authKey | string | `"password"` | authentication key, must be attached to each request as `X-Api-Key` header |
+| controlplane.endpoints.management.authKeySecret | object | `{}` | Optional Secret reference for the management API authentication key |
 | controlplane.endpoints.management.jwksUrl | string | `nil` | if the JWKS url is set, the DelegatedAuth service will be engaged |
 | controlplane.endpoints.management.path | string | `"/management"` | path for incoming api calls |
 | controlplane.endpoints.management.port | int | `8081` | port for incoming api calls |
@@ -233,8 +236,9 @@ helm install my-release tractusx-edc/tractusx-connector --version 0.13.0-SNAPSHO
 | dataplane.aws.secretAccessKey | string | `""` |  |
 | dataplane.debug.enabled | bool | `false` | Enables java debugging mode. |
 | dataplane.debug.port | int | `1044` | Port where the debuggee can connect to. |
+| dataplane.participantId | string | `""` | Participant id used by the dataplane. Defaults to participant.id. |
 | dataplane.debug.suspendOnStart | bool | `false` | Defines if the JVM should wait with starting the application until someone connected to the debugging port. |
-| dataplane.endpoints | object | `{"control":{"path":"/api/control","port":8084},"default":{"path":"/api","port":8080},"metrics":{"path":"/metrics","port":9090},"proxy":{"authKey":"password","path":"/proxy","port":8186},"public":{"path":"/api/public","port":8081}}` | endpoints of the dataplane |
+| dataplane.endpoints | object | `{"control":{"path":"/api/control","port":8084},"default":{"path":"/api","port":8080},"metrics":{"path":"/metrics","port":9090},"proxy":{"authKey":"password","authKeySecret":{},"path":"/proxy","port":8186},"public":{"path":"/api/public","port":8081}}` | endpoints of the dataplane |
 | dataplane.endpoints.control | object | `{"path":"/api/control","port":8084}` | control api, used for internal control calls. can be added to the internal ingress, but should probably not |
 | dataplane.endpoints.control.path | string | `"/api/control"` | path for incoming api calls |
 | dataplane.endpoints.control.port | int | `8084` | port for incoming api calls |
@@ -245,6 +249,7 @@ helm install my-release tractusx-edc/tractusx-connector --version 0.13.0-SNAPSHO
 | dataplane.endpoints.metrics.path | string | `"/metrics"` | path for incoming api calls |
 | dataplane.endpoints.metrics.port | int | `9090` | port for incoming api calls |
 | dataplane.endpoints.proxy.authKey | string | `"password"` | authentication key, must be attached to each request as `X-Api-Key` header |
+| dataplane.endpoints.proxy.authKeySecret | object | `{}` | Optional Secret reference for the consumer proxy authentication key |
 | dataplane.endpoints.proxy.path | string | `"/proxy"` | path for incoming api calls |
 | dataplane.endpoints.proxy.port | int | `8186` | port for incoming api calls |
 | dataplane.endpoints.public | object | `{"path":"/api/public","port":8081}` | public endpoint where the data can be fetched from if HttpPull was used. Must be internet facing. |
@@ -373,6 +378,7 @@ helm install my-release tractusx-edc/tractusx-connector --version 0.13.0-SNAPSHO
 | vault.hashicorp.paths.secret | string | `"/v1/secret"` |  |
 | vault.hashicorp.timeout | int | `30` |  |
 | vault.hashicorp.token | string | `"root"` |  |
+| vault.hashicorp.tokenSecret | object | `{}` | Optional Secret reference for the HashiCorp Vault token |
 | vault.hashicorp.url | string | `"http://{{ .Release.Name }}-vault:8200"` |  |
 | vault.injector.enabled | bool | `false` |  |
 | vault.server.dev.devRootToken | string | `"root"` |  |

@@ -146,7 +146,7 @@ spec:
             ## ID CONFIGURATION ##
             ########################
             - name: EDC_PARTICIPANT_ID
-              value: {{ .Values.participant.id | required ".Values.participant.id is required" | quote }}
+              value: {{ .Values.dataplane.participantId | default .Values.participant.id | required ".Values.participant.id is required" | quote }}
             - name: EDC_PARTICIPANT_CONTEXT_ID
               value: {{ .Values.participant.contextId | required ".Values.participant.contextId is required" | quote}}
             - name: "EDC_IAM_ISSUER_ID"
@@ -164,7 +164,14 @@ spec:
             # API #
             #######
             - name: "TX_EDC_DPF_CONSUMER_PROXY_AUTH_APIKEY"
+              {{ if .Values.dataplane.endpoints.proxy.authKeySecret.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dataplane.endpoints.proxy.authKeySecret.name | quote }}
+                  key: {{ .Values.dataplane.endpoints.proxy.authKeySecret.key | default "management-key" | quote }}
+              {{ else }}
               value: {{ .Values.dataplane.endpoints.proxy.authKey | required ".Values.dataplane.endpoints.proxy.authKey is required" | quote }}
+              {{ end }}
             - name: "WEB_HTTP_PORT"
               value: {{ .Values.dataplane.endpoints.default.port | quote }}
             - name: "WEB_HTTP_PATH"
@@ -206,7 +213,14 @@ spec:
             - name: "EDC_VAULT_HASHICORP_URL"
               value: {{ tpl .Values.vault.hashicorp.url . | quote }}
             - name: "EDC_VAULT_HASHICORP_TOKEN"
+              {{ if .Values.vault.hashicorp.tokenSecret.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vault.hashicorp.tokenSecret.name | quote }}
+                  key: {{ .Values.vault.hashicorp.tokenSecret.key | default "vault-token" | quote }}
+              {{ else }}
               value: {{ .Values.vault.hashicorp.token | required ".Values.vault.hashicorp.token is required" | quote }}
+              {{ end }}
             - name: "EDC_VAULT_HASHICORP_TIMEOUT_SECONDS"
               value: {{ .Values.vault.hashicorp.timeout | quote }}
             - name: "EDC_VAULT_HASHICORP_HEALTH_CHECK_ENABLED"
@@ -244,7 +258,14 @@ spec:
             - name: "EDC_DATASOURCE_DEFAULT_USER"
               value: {{ .Values.postgresql.auth.username | required ".Values.postgresql.auth.username is required" | quote }}
             - name: "EDC_DATASOURCE_DEFAULT_PASSWORD"
+              {{ if .Values.postgresql.auth.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.auth.existingSecret | quote }}
+                  key: {{ .Values.postgresql.auth.secretKeys.adminPasswordKey | default "postgres-password" | quote }}
+              {{ else }}
               value: {{ .Values.postgresql.auth.password | required ".Values.postgresql.auth.password is required" | quote }}
+              {{ end }}
             - name: "EDC_DATASOURCE_DEFAULT_URL"
               value: {{ tpl .Values.postgresql.jdbcUrl . | quote }}
             {{- else }}

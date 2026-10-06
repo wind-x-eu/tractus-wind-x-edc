@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "windx.fullname" . }}-identityhub
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+    app.kubernetes.io/component: identityhub
+spec:
+  replicas: {{ .Values.identityhub.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: identityhub
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: identityhub
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      initContainers:
+        - name: prepare-logs
+          image: {{ .Values.identityhub.logInitImage | quote }}
+          command: ["sh", "-c", "chmod 1777 /app/logs"]
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+        - name: wait-for-postgresql
+          image: {{ .Values.postgresql.image | quote }}
+          command:
+            - sh
+            - -c
+            - >-
+              until pg_isready -h {{ .Values.postgresql.host | quote }}
+              -p {{ .Values.postgresql.port }} -U {{ .Values.postgresql.username | quote }}
+              -d {{ .Values.postgresql.identityHubDatabase | quote }}; do
+                echo 'waiting for PostgreSQL'; sleep 3;
+              done
+        - name: wait-for-vault
+          image: {{ .Values.vault.bootstrap.image | quote }}
+          command:
+            - sh
+            - -c
+            - >-
+              until code=$(curl -sS -o /dev/null -w '%{http_code}'
+              {{ printf "%s%s" (trimSuffix "/" .Values.vault.url) .Values.vault.healthApiPath | quote }});
+              [ "$code" = 200 ] || [ "$code" = 429 ]; do
+                echo 'waiting for Vault'; sleep 3;
+              done
+      containers:
+        - name: identityhub
+          image: {{ printf "%s:%s" .Values.identityhub.image.repository .Values.identityhub.image.tag | quote }}
+          imagePullPolicy: {{ .Values.identityhub.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/start-java.sh"]
+          ports:
+            - name: default
+              containerPort: 8081
+            - name: identity
+              containerPort: 8082
+            - name: credentials
+              containerPort: 8083
+            - name: did
+              containerPort: 8084
+            - name: accounts
+              containerPort: 8085
+            - name: version
+              containerPort: 8086
+            - name: sts
+              containerPort: 8087
+          env:
+            - name: ROLE
+              value: identityhub
+          startupProbe:
+            tcpSocket:
+              port: default
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: default
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: default
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.identityhub.resources | nindent 12 }}
+          volumeMounts:
+            - name: scripts-and-logging
+              mountPath: /scripts
+              readOnly: true
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: logs
+              mountPath: /app/logs
+            - name: scripts-and-logging
+              mountPath: /app/logging.properties
+              subPath: logging.properties
+              readOnly: true
+            - name: identityhub-config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: identityhub-config
+          configMap:
+            name: {{ include "windx.fullname" . }}-identityhub-files
+            items:
+              - key: identityhub.properties
+                path: identityhub.properties
+        - name: scripts-and-logging
+          configMap:
+            name: {{ include "windx.fullname" . }}-identityhub-files
+            defaultMode: 365
+            items:
+              - key: start-java.sh
+                path: start-java.sh
+              - key: ih-provision.sh
+                path: ih-provision.sh
+              - key: logging.properties
+                path: logging.properties
+        - name: logs
+          emptyDir: {}
+        {{- include "windx.identityhubSecretVolume" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.identityhub.serviceName }}
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+    app.kubernetes.io/component: identityhub
+spec:
+  type: ClusterIP
+  ports:
+    - name: default
+      port: 8081
+      targetPort: default
+    - name: identity
+      port: 8082
+      targetPort: identity
+    - name: credentials
+      port: 8083
+      targetPort: credentials
+    - name: did
+      port: 8084
+      targetPort: did
+    - name: accounts
+      port: 8085
+      targetPort: accounts
+    - name: version
+      port: 8086
+      targetPort: version
+    - name: sts
+      port: 8087
+      targetPort: sts
+  selector:
+    app.kubernetes.io/component: identityhub
+    app.kubernetes.io/instance: {{ .Release.Name }}

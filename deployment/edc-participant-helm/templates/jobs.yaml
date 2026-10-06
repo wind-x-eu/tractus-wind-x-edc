@@ -1,0 +1,94 @@
+{{- if .Values.vault.bootstrap.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "windx.fullname" . }}-vault-bootstrap
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: vault-bootstrap
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: vault-bootstrap
+          image: {{ .Values.vault.bootstrap.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/vault-bootstrap.sh"]
+          env:
+            - name: VAULT_URL
+              value: {{ .Values.vault.url | quote }}
+            - name: VAULT_KV_V2_DATA_PATH
+              value: {{ .Values.vault.kvV2DataPath | quote }}
+            - name: VAULT_HEALTH_PATH
+              value: {{ .Values.vault.healthApiPath | quote }}
+          volumeMounts:
+            - name: vault-bootstrap-script
+              mountPath: /scripts
+              readOnly: true
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
+      volumes:
+        - name: vault-bootstrap-script
+          configMap:
+            name: {{ include "windx.fullname" . }}-vault-bootstrap-script
+            defaultMode: 365
+        {{- include "windx.vaultBootstrapSecretVolume" . | nindent 8 }}
+---
+{{- end }}
+{{- if .Values.identityhub.provision.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "windx.fullname" . }}-identityhub-provision
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: identityhub-provision
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: identityhub-provision
+          image: {{ .Values.identityhub.provision.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/ih-provision.sh"]
+          env:
+            - name: PUBLIC_HOST
+              value: {{ .Values.participant.publicHost | quote }}
+            - name: IDENTITYHUB_API_URL
+              value: {{ printf "http://%s:8082/api/identity/v1alpha/participants" .Values.identityhub.serviceName | quote }}
+          volumeMounts:
+            - name: scripts-and-logging
+              mountPath: /scripts
+              readOnly: true
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
+      volumes:
+        - name: scripts-and-logging
+          configMap:
+            name: {{ include "windx.fullname" . }}-identityhub-files
+            defaultMode: 365
+        {{- include "windx.provisionSecretVolume" . | nindent 8 }}
+{{- end }}

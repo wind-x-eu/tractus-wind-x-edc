@@ -1,0 +1,10 @@
+Wind-X participant resources have been submitted.
+
+Public DID document:
+  https://{{ .Values.participant.publicHost }}/.well-known/did.json
+
+The connector release is installed by Helmfile after IdentityHub provisioning succeeds.
+Check the releases with:
+  helm list --namespace {{ .Release.Namespace }}
+
+The connector management API is not exposed by the public ingress.

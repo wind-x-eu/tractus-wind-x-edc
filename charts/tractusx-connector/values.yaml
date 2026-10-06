@@ -183,6 +183,10 @@ controlplane:
       path: /management
       # -- authentication key, must be attached to each request as `X-Api-Key` header
       authKey: "password"
+      # -- Optional Secret reference for the management API authentication key
+      authKeySecret: {}
+      #   name: participant-secrets
+      #   key: management-key
       # -- if the JWKS url is set, the DelegatedAuth service will be engaged
       jwksUrl:
 
@@ -211,6 +215,10 @@ controlplane:
     server:
       # -- URL of the BPN/DID Resolution Service
       url: "CHANGEME"
+      # -- Environment variable used for the BDRS URL (Wind-X images may use the IATP name)
+      environmentVariable: "TX_EDC_IAM_DCP_BDRS_SERVER_URL"
+    # -- Environment variable used for BDRS cache validity
+    cacheValidityEnvironmentVariable: "TX_EDC_IAM_DCP_BDRS_CACHE_VALIDITY"
 
   # -- configuration for policy engine
   policy:
@@ -382,6 +390,8 @@ controlplane:
     protocol: ""
 
 dataplane:
+  # -- Participant id used by the dataplane. Defaults to participant.id.
+  participantId: ""
   image:
     # -- Which derivate of the data plane to use. when left empty the deployment will select the correct image automatically
     repository: ""
@@ -464,6 +474,10 @@ dataplane:
       path: /proxy
       # -- authentication key, must be attached to each request as `X-Api-Key` header
       authKey: "password"
+      # -- Optional Secret reference for the consumer proxy authentication key
+      authKeySecret: {}
+      #   name: participant-secrets
+      #   key: management-key
     # -- metrics api, used for application metrics, must not be internet facing
     metrics:
       # -- port for incoming api calls
@@ -691,6 +705,10 @@ vault:
   hashicorp:
     url: "http://{{ .Release.Name }}-vault:8200"
     token: "root"
+    # -- Optional Secret reference for the HashiCorp Vault token
+    tokenSecret: {}
+    #   name: participant-secrets
+    #   key: vault-token
     timeout: 30
     healthCheck:
       enabled: true

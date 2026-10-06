@@ -1,0 +1,60 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "windx.fullname" . }}-postgres-init
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+data:
+  20-create-ih.sql: |
+    CREATE DATABASE "{{ .Values.postgresql.identityHubDatabase }}" OWNER "{{ .Values.postgresql.username }}";
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "windx.fullname" . }}-identityhub-files
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+data:
+  start-java.sh: |
+{{ .Files.Get "files/start-java.sh" | indent 4 }}
+  ih-provision.sh: |
+{{ .Files.Get "files/ih-provision.sh" | indent 4 }}
+  logging.properties: |
+{{ .Files.Get "files/ih-logging.properties" | indent 4 }}
+  identityhub.properties: |
+    edc.vault.hashicorp.url={{ .Values.vault.url }}
+    edc.vault.hashicorp.timeout.seconds=30
+    edc.vault.hashicorp.health.check.enabled=true
+    edc.vault.hashicorp.health.check.standby.ok=true
+    edc.vault.hashicorp.api.secret.path={{ .Values.vault.secretApiPath }}
+    edc.vault.hashicorp.api.health.check.path={{ .Values.vault.healthApiPath }}
+    edc.iam.accesstoken.jti.validation=true
+    edc.iam.sts.privatekey.alias=did:web:{{ .Values.participant.publicHost }}#signing-key-1
+    edc.iam.sts.publickey.id=did:web:{{ .Values.participant.publicHost }}#signing-key-1
+    edc.ih.iam.id=did:web:{{ .Values.participant.publicHost }}
+    web.http.port=8081
+    web.http.path=/api
+    web.http.identity.port=8082
+    web.http.identity.path=/api/identity
+    web.http.identity.auth.alias=sup3r$3cr3t
+    web.http.credentials.port=8083
+    web.http.credentials.path=/api/credentials
+    web.http.did.port=8084
+    web.http.did.path=/
+    web.http.accounts.port=8085
+    web.http.accounts.path=/api/accounts
+    web.http.version.port=8086
+    web.http.version.path=/.well-known/api
+    web.http.sts.port=8087
+    web.http.sts.path=/api/sts
+    edc.tractusx.ih.participant.configurable.enable=false
+    edc.iam.did.web.use.https=true
+    edc.iam.credential.revocation.mimetype=*/*
+    edc.encryption.strict=false
+{{ range $store := list "participantcontext" "keypair" "didresource" "stsclient" "credentialrequest" "credentials" "jti" "participantcontextconfig" }}
+    edc.sql.store.{{ $store }}.datasource={{ $store }}
+    edc.datasource.{{ $store }}.url=jdbc:postgresql://{{ $.Values.postgresql.host }}:{{ $.Values.postgresql.port }}/{{ $.Values.postgresql.identityHubDatabase }}
+    edc.datasource.{{ $store }}.user={{ $.Values.postgresql.username }}
+{{ end }}
