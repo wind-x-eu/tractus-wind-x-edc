@@ -33,11 +33,13 @@ dependencies {
     implementation(project(":edc-dataplane:edc-dataplane-base"))
     implementation(project(":edc-extensions:migrations:connector-migration"))
 
-    // Wind-X-Fachlogik. Alle vier sind reine Data-Plane-Extensions (haengen nur an
-    // edc.spi.core / edc.spi.web / edc.spi.dataplane.dataplane) -- kein Control-Plane-Bezug.
+    // Wind-X-Fachlogik. Alle sind reine Data-Plane-Extensions (haengen nur an
+    // edc.spi.core / edc.spi.web / edc.spi.dataplane.dataplane; windx-tcp-tunnel zusaetzlich an
+    // Jetty-WebSocket) -- kein Control-Plane-Bezug.
     // Die Control-Plane bleibt dadurch unveraendertes Upstream.
     implementation(project(":edc-extensions:windx:windx-mediator-proxy"))
     implementation(project(":edc-extensions:windx:windx-mms"))
+    implementation(project(":edc-extensions:windx:windx-tcp-tunnel"))
     implementation(project(":edc-extensions:windx:windx-participant-log"))
     implementation(project(":edc-extensions:non-finite-provider-push:non-finite-provider-push-core"))
 

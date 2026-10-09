@@ -37,6 +37,8 @@ dependencies {
     // ... und die Wind-X-MMS-Data-Plane-Extension (registriert die 'mms'-Source-Factory), damit der
     //     Provider fuer 'mms'-Assets 'Mms-PULL' und 'HttpData-PUSH' anbietet.
     implementation(project(":edc-extensions:windx:windx-mms"))
+    // ... und der protokollneutrale TCP-ueber-WebSocket-Tunnel ('TcpTunnel-PULL').
+    implementation(project(":edc-extensions:windx:windx-tcp-tunnel"))
     // ... und die non-finite-PipelineService (ersetzt die Standard-PipelineService) fuer kontinuierlichen
     //     Mms-PUSH (Source-Property edc:isNonFinite=true).
     implementation(project(":edc-extensions:non-finite-provider-push:non-finite-provider-push-core"))

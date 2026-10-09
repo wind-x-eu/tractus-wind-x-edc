@@ -54,6 +54,10 @@ dependencies {
     // windx: dediziertes Runtime-Modul (dcp-ih + windx-mediator-proxy); die Extension wird so im
     // Runtime-Classloader via ServiceLoader geladen, nicht aus dem Test-Classpath (sonst SPI-Doppelung).
     testCompileOnly(project(":edc-tests:runtime:dcp:runtime-memory-dcp-ih-windx"))
+    // windx-tcp-tunnel: WireMocks Jetty-BOM drueckt den Jetty-Kern im Test-Classpath auf 12.0.x. Die
+    // WebSocket-Jars muessen dieselbe Version haben, sonst kommen sie in 12.1.x aus dem Runtime-Modul
+    // (IncompatibleClassChangeError beim Upgrade). Nur ein Test-Artefakt: die echten Runtimes laufen auf 12.1.x.
+    testRuntimeOnly("org.eclipse.jetty.ee10.websocket:jetty-ee10-websocket-jetty-server") // Version aus der BOM
 }
 
 // do not publish
