@@ -148,7 +148,12 @@ public class TcpTunnelSession implements Session.Listener.AutoDemanding {
 
     @Override
     public void onWebSocketError(Throwable cause) {
-        monitor.debug("Tunnel of flow %s failed: %s".formatted(flowId, cause.getMessage()));
+        // Jetty meldet auch ein Verbindungsende ohne Close-Frame (z.B. Agent beendet TCP hart) als Fehler,
+        // haeufig mit leerer Message. Ist der Tunnel ohnehin schon zu, ist das kein Fehler mehr.
+        if (!closed.get()) {
+            var detail = cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+            monitor.debug("Tunnel of flow %s ended without close handshake: %s".formatted(flowId, detail));
+        }
         closeSocket();
         registry.remove(flowId, this);
     }

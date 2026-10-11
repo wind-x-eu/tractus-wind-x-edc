@@ -77,9 +77,11 @@ public class TcpTunnelEndpointDataReferenceService implements EndpointDataRefere
 
     @Override
     public ServiceResult<Void> revokeEndpointDataReference(String flowId, String reason) {
-        var closed = registry.closeFlow(flowId, "transfer revoked: " + reason);
+        // die Data Plane reicht beim Terminate ueber DSP haeufig keinen Grund durch
+        var effectiveReason = reason == null || reason.isBlank() ? "transfer terminated or suspended" : reason;
+        var closed = registry.closeFlow(flowId, "transfer revoked: " + effectiveReason);
         if (closed > 0) {
-            monitor.info("Closed %d tunnel connection(s) of flow %s (reason: %s)".formatted(closed, flowId, reason));
+            monitor.info("Closed %d tunnel connection(s) of flow %s (reason: %s)".formatted(closed, flowId, effectiveReason));
         }
         return delegate.revokeEndpointDataReference(flowId, reason);
     }
