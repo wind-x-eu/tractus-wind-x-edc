@@ -38,6 +38,7 @@ dependencies {
     // Die Control-Plane bleibt dadurch unveraendertes Upstream.
     implementation(project(":edc-extensions:windx:windx-mediator-proxy"))
     implementation(project(":edc-extensions:windx:windx-mms"))
+    implementation(project(":edc-extensions:windx:windx-tcp-tunnel"))
     implementation(project(":edc-extensions:windx:windx-participant-log"))
     implementation(project(":edc-extensions:non-finite-provider-push:non-finite-provider-push-core"))
 

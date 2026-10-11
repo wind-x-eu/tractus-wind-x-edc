@@ -129,6 +129,7 @@ include(":edc-extensions:single-participant-vault")
 include(":edc-extensions:windx:windx-participant-log")
 include(":edc-extensions:windx:windx-mediator-proxy")
 include(":edc-extensions:windx:windx-mms")
+include(":edc-extensions:windx:windx-tcp-tunnel")
 include(":edc-extensions:windx:windx-bdrs-static")
 
 // test modules

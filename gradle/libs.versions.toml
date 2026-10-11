@@ -5,6 +5,8 @@ format.version = "1.1"
 edc = "0.15.1"
 edc-next = "0.16.0"
 edc-build = "1.1.6"
+# Muss zur Jetty-Version von org.eclipse.edc:jetty-core passen (EDC 0.15.1 -> 12.1.4, per Vulnerability-Constraint 12.1.7)
+jetty = "12.1.7"
 allure = "2.33.0"
 awaitility = "4.3.0"
 aws = "2.42.7"
@@ -230,6 +232,7 @@ testcontainers-minio = { module = "org.testcontainers:testcontainers-minio", ver
 testcontainers-localstack = { module = "org.testcontainers:testcontainers-localstack", version.ref = "testcontainers" }
 testcontainers-postgres = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
 titaniumJsonLd = { module = "com.apicatalog:titanium-json-ld", version.ref = "titanium" }
+jetty-websocket-server = { module = "org.eclipse.jetty.ee10.websocket:jetty-ee10-websocket-jetty-server", version.ref = "jetty" }
 wiremock = { module = "org.wiremock:wiremock-jetty12", version.ref = "wiremock" }
 
 log4j2-api = { module = "org.apache.logging.log4j:log4j-api", version.ref = "log4j2" }
