@@ -55,19 +55,46 @@ aber ein gültiges Token (Token-Refresh über den Consumer-Connector).
 
 ## Consumer-Agent
 
-Jeder WebSocket-Client, der einen `Authorization`-Header setzen kann, funktioniert. Mit
-[websocat](https://github.com/vi/websocat) wird der Tunnel als lokaler Port bereitgestellt:
+Empfohlen ist der mitgelieferte Agent [`agent/windx_tunnel_agent.py`](agent/windx_tunnel_agent.py). Er stellt den
+Tunnel als lokalen TCP-Port bereit und holt **für jede neue Verbindung** den aktuellen EDR bei der Management-API des
+eigenen Connectors (`/v3/edrs/{transferId}/dataaddress?auto_refresh=true`). Abgelaufene Tokens erneuert damit der
+Connector, und der Agent muss nie neu gestartet werden.
 
 ```bash
-EDR=$(curl -s -H "X-Api-Key: $KEY" "$CONSUMER_MGMT/v3/edrs/$TRANSFER_ID/dataaddress?auto_refresh=true")
-websocat --binary -H "Authorization: $(jq -r .authorization <<<"$EDR")" \
-  tcp-l:127.0.0.1:4840 "$(jq -r .endpoint <<<"$EDR")"
-# OPC-UA-Client -> opc.tcp://127.0.0.1:4840
+pip install -r agent/requirements.txt
+export WINDX_MGMT_API_KEY=...        # API-Key der eigenen Management-API
+python3 agent/windx_tunnel_agent.py --listen 127.0.0.1:4840 \
+  --management-url https://consumer.example/management --transfer-id <transferProcessId>
+# OPC-UA-Client -> opc.tcp://127.0.0.1:4840, MQTT-Client -> 127.0.0.1:<port> usw.
 ```
 
-Hinweis: websocat liest den Header nur einmal beim Start. Für jede neue TCP-Verbindung baut websocat eine neue
-WebSocket-Verbindung mit demselben Token auf. Läuft das Token ab, muss der Agent neu gestartet werden. Ein Agent mit
-eingebautem Token-Refresh ist noch offen.
+Beendet der Provider den Tunnel (Transfer terminiert), loggt der Agent den Close-Code. Neue Verbindungen lehnt der
+Provider dann mit HTTP 403 ab.
+
+Für einen schnellen Test geht auch [websocat](https://github.com/vi/websocat). Das Token wird dabei nur einmal beim
+Start gelesen und läuft nach `tx-auth:expiresIn` Sekunden ab (bei Tractus-X 300 s):
+
+```bash
+websocat -b tcp-l:127.0.0.1:4840 "$ENDPOINT" -H="Authorization: $TOKEN"   # -H= mit Gleichheitszeichen
+```
+
+## Protokoll-Hinweise
+
+- **OPC UA:** Der Client sieht nur die lokale Tunnel-Adresse. Zwei Dinge weichen deshalb von der Server-Identität ab:
+  1. Die Endpoint-URL aus `GetEndpoints` (z. B. `opc.tcp://dave-opcua:50000/`). Der Client muss die lokale Adresse
+     behalten ("Endpoint-URL/Hostname-Abweichung ignorieren").
+  2. Die `ServerUri` in `CreateSession`: Manche Clients bilden sie aus dem Hostnamen (z. B. asyncua: `urn:127.0.0.1`),
+     und der Server lehnt dann mit `BadServerUriInvalid` ab. Abhilfe: die ApplicationUri aus `GetEndpoints`
+     übernehmen.
+
+  Mit OPC-UA-Security (Sign/SignAndEncrypt) muss außerdem das Server-Zertifikat zum Hostnamen passen oder die
+  Prüfung im Client gelockert werden. Getestet live mit dem OPC PLC Simulator: Browse, Read, Subscription und Write.
+- **MQTT:** funktioniert ohne Besonderheiten. Live getestet mit Mosquitto (pub/sub).
+- **Datenbanken** (PostgreSQL, MySQL/MariaDB, MS SQL, Oracle), noch nicht live getestet: Die Wire-Protokolle sind
+  normales TCP und laufen durch. Die Anmeldung an der Datenbank bleibt Sache der Datenbank. Für Abfragen auf Legacy-Systeme einen eigenen
+  Benutzer mit reinem Leserecht auf freigegebene Views anlegen. Ausnahmen:
+  - Oracle mit Port-Redirect (Shared Server, ältere Windows-Listener)
+  - MS SQL mit benannter Instanz (SQL Browser über UDP 1434): stattdessen den festen Port der Instanz nutzen
 
 ## Settings (Data Plane)
 
