@@ -29,6 +29,8 @@ on:
   push:
     branches:
       - main
+      # Feature-Branches auf dem 0.12.1-Stand bauen ein eigenes Image (Tag = Branch-Name, kein latest)
+      - "feat/windx-*"
       - "windx-on-tractusx-*"
     tags:
       - "v*"
