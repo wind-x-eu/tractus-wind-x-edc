@@ -108,7 +108,7 @@ jobs:
 
       # uploads the jacoco report as artifact
       - name: Upload JaCoCo Coverage Report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: JaCoCo coverage-report
           path: build/reports/jacoco/testCodeCoverageReport/testCodeCoverageReport.xml
@@ -140,7 +140,7 @@ jobs:
 
       # uploads the coverage-report.md artifact
       - name: Upload Code Coverage Markdown Report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: code-coverage-report-markdown
           path: "*/coverage-results.md"
@@ -236,7 +236,7 @@ jobs:
           echo "ARTIFACT_NAME=${SANITIZED_NAME}" >> $GITHUB_ENV
 
       - name: Upload test artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: allure-results-${{ env.ARTIFACT_NAME }}
           path: edc-tests/e2e/${{ matrix.dir }}/build/allure-results
