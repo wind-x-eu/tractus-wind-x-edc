@@ -25,7 +25,7 @@ plugins {
 dependencies {
     implementation(libs.edc.spi.core)                // ServiceExtension, @Setting/@Inject/@Extension, Monitor, Hostname, DataFlowStartMessage
     implementation(libs.edc.spi.dataplane.dataplane) // DataSource(Factory), PipelineService, PublicEndpointGeneratorService, EndpointDataReferenceServiceRegistry, DataPlaneAuthorizationService, Endpoint
-    implementation("com.google.code.gson:gson:2.10.1") // portierter mms.client-Stack serialisiert Aggregationen mit gson
+    implementation("com.google.code.gson:gson:2.14.0") // portierter mms.client-Stack serialisiert Aggregationen mit gson
     // slf4j-api ist bereits ueber den allprojects-Block auf dem Classpath (portierter mms.client nutzt es)
 
     testImplementation(libs.edc.junit)
