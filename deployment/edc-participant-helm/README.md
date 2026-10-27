@@ -16,6 +16,23 @@ The default stack matches `edc-participant-compose`:
 
 The chart contains focused connector templates adapted from the Tractus-X connector configuration and the Compose deployment. It does not expose the full upstream connector chart's values API. Connector images, resources, replica counts, log level, registry credentials, and additional environment variables are configured in this chart's `values.yaml`.
 
+## Version alignment with Compose
+
+The Compose README identifies `tractusx-connector 0.12.1` and `tractusx-identityhub v0.3.2` as the source charts for its rendered runtime configuration. Those are chart versions. This standalone chart installs neither upstream chart; its default runtime configuration and image references match the checked-in Compose definition and `.env.example`.
+
+| Component | Default image in both deployments |
+|---|---|
+| Control Plane | `ghcr.io/wind-x-eu/edc-controlplane-postgresql-hashicorp-vault:sha-9f724fe` |
+| Data Plane | `ghcr.io/wind-x-eu/edc-dataplane-windx:sha-9f724fe` |
+| IdentityHub | `tractusx/identityhub:0.3.2` |
+| PostgreSQL | `postgres:16.4-alpine` |
+| Vault | `hashicorp/vault:1.17` |
+| Vault keeper and provisioning tools | `curlimages/curl:8.10.1` |
+
+The standalone chart's `version: 0.2.0` identifies this package. Its `appVersion: sha-9f724fe` records the Wind-X connector image tag; actual image references are set explicitly in `values.yaml`. Neither field selects upstream chart `0.12.1` or changes the IdentityHub image version.
+
+Kubernetes-specific differences: `busybox:1.36.1` prepares the IdentityHub log volume; Helm generates credentials without Compose's secrets container; Ingress replaces Compose's `caddy:2.8` proxy. The ingress controller and its version are managed by the target cluster. Local Compose `.env` overrides and Helm values overrides can change these defaults independently.
+
 ## Install on a cluster
 
 Use Helm 3 or 4 and a Kubernetes cluster supporting `apps/v1`, `batch/v1`, and `networking.k8s.io/v1`. The cluster needs enough capacity for the configured resources, registry access for the selected images, and persistent volume provisioning. Set both `postgresql.persistence.storageClassName` and `vault.persistence.storageClassName` if there is no default StorageClass. The bundled containers require Linux nodes compatible with the selected images. Cluster admission policies must permit the images' users; the log-directory init container and Vault backup keeper use root to prepare their writable volumes.
@@ -118,4 +135,4 @@ The previous Helmfile installed separate `windx-participant` and `windx-connecto
 
 ## Verification
 
-Run `node tests/verify.mjs` from this directory (requires Node.js, Helm, and kubectl). It renders a matrix of bundled/external services, checks resource wiring and public routes, packages the chart in an isolated temporary directory, and renders the package. Add `--compose ../edc-participant-compose` to compare every connector runtime variable with Compose (also requires the Docker Compose CLI, but no Docker daemon). These checks do not contact a cluster. An actual cluster deployment and public TLS/data-space traffic still need validation in your target environment.
+Run `node tests/verify.mjs` from this directory (requires Node.js, Helm, and kubectl). It renders a matrix of bundled/external services, checks resource wiring and public routes, packages the chart in an isolated temporary directory, and renders the package. Add `--compose ../edc-participant-compose` to compare all shared image references, Control Plane/Data Plane/IdentityHub runtime variables, logging, and OpenTelemetry settings with Compose (also requires the Docker Compose CLI, but no Docker daemon). These checks do not contact a cluster. An actual cluster deployment and public TLS/data-space traffic still need validation in your target environment.

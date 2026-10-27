@@ -180,13 +180,48 @@ try {
       '-f', join(compose, 'docker-compose.yml'), 'config', '--format', 'json', '--no-path-resolution'], {
       env: { ...process.env, BPN: 'BPNLCHANGEME', PUBLIC_HOST: 'edc.partner.example' },
     }));
+    for (const [kind, name, container, service] of [
+      ['Deployment', 'portable-controlplane', 'controlplane', 'controlplane'],
+      ['Deployment', 'portable-dataplane', 'dataplane', 'dataplane'],
+      ['Deployment', 'portable-identityhub', 'identityhub', 'identityhub'],
+      ['StatefulSet', 'portable-postgresql', 'postgresql', 'postgres'],
+      ['StatefulSet', 'portable-vault', 'vault', 'vault'],
+      ['StatefulSet', 'portable-vault', 'vault-keeper', 'vault-keeper'],
+      ['Job', 'portable-identityhub-provision-1', 'identityhub-provision', 'ih-provision'],
+    ]) {
+      const workload = bundled.find(item => item.kind === kind && item.metadata.name === name);
+      const image = workload.spec.template.spec.containers.find(item => item.name === container).image;
+      assert.equal(image, definition.services[service].image, `${service}: image must match Compose`);
+    }
+    const bootstrap = external.find(item => item.kind === 'Job' && item.metadata.name.includes('vault-bootstrap'));
+    assert.equal(bootstrap.spec.template.spec.containers[0].image, definition.services['vault-keeper'].image);
+    for (const workload of bundled.filter(item => item.spec?.template)) {
+      for (const init of workload.spec.template.spec.initContainers ?? []) {
+        if (init.name === 'prepare-logs') {
+          // This Kubernetes-only helper prepares IdentityHub's emptyDir log volume.
+          assert.equal(init.image, 'busybox:1.36.1');
+        } else if (init.name === 'wait-for-postgresql') {
+          assert.equal(init.image, definition.services.postgres.image);
+        } else {
+          assert.equal(init.image, definition.services['ih-provision'].image);
+        }
+      }
+    }
+    console.log('PASS: all shared workload/helper image versions match Compose; Kubernetes-only BusyBox helper is pinned');
+
+    for (const file of ['ih-logging.properties', 'log4j2.yaml',
+      'opentelemetry-controlplane.properties', 'opentelemetry-dataplane.properties']) {
+      const normalize = text => text.replaceAll('\r\n', '\n').split('\n')
+        .filter(line => !line.trimStart().startsWith('#')).map(line => line.trim()).filter(Boolean).join('\n');
+      assert.equal(normalize(readFileSync(join(chart, 'files', file), 'utf8')),
+        normalize(readFileSync(join(compose, 'config', file), 'utf8')), `${file}: settings must match Compose`);
+    }
+    console.log('PASS: IdentityHub/connector logging and OpenTelemetry settings match Compose');
     for (const role of ['controlplane', 'dataplane']) {
       const actual = { ...bundled.find(item => item.kind === 'ConfigMap' && item.metadata.name === `portable-${role}`).data, ROLE: role };
       const expected = Object.fromEntries(Object.entries(definition.services[role].environment)
         .map(([key, value]) => [key, normalizeAddresses(value)]));
       assert.deepEqual(actual, expected, `${role}: Helm runtime settings must match Compose`);
-      const deployment = bundled.find(item => item.kind === 'Deployment' && item.metadata.name === `portable-${role}`);
-      assert.equal(deployment.spec.template.spec.containers[0].image, definition.services[role].image);
     }
     const properties = bundled.find(item => item.kind === 'ConfigMap' && item.metadata.name === 'portable-identityhub-files').data['identityhub.properties'];
     const actual = Object.fromEntries(properties.split('\n').filter(line => line.includes('=')).map(line => {
