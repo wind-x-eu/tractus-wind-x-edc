@@ -1,0 +1,132 @@
+{{- if .Values.vault.enabled }}
+{{- if or (ne .Values.vault.kvV2DataPath "secret/data") (ne .Values.vault.secretApiPath "/v1/secret") }}
+{{- fail "Bundled Vault uses the secret KV v2 mount; use vault.enabled=false for custom Vault paths" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "windx.fullname" . }}-vault-keeper
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+data:
+  vault-keeper.sh: |
+{{ .Files.Get "files/vault-keeper.sh" | replace "\r\n" "\n" | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "windx.vaultHost" . }}
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8200
+      targetPort: http
+  selector:
+    app.kubernetes.io/component: vault
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "windx.fullname" . }}-vault
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "windx.vaultHost" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: vault
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        checksum/keeper: {{ .Files.Get "files/vault-keeper.sh" | sha256sum }}
+      labels:
+        app.kubernetes.io/component: vault
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- include "windx.imagePullSecrets" . | nindent 6 }}
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: vault
+          image: {{ .Values.vault.image | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              export VAULT_DEV_ROOT_TOKEN_ID="$(cat /secrets/vault_token)";
+              exec vault server -dev -dev-listen-address=0.0.0.0:8200
+          env:
+            - name: SKIP_SETCAP
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8200
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: http
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.vault.resources | nindent 12 }}
+          volumeMounts:
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
+        - name: vault-keeper
+          image: {{ .Values.vault.keeperImage | quote }}
+          securityContext:
+            runAsUser: 0
+          command: ["/bin/sh", "/scripts/vault-keeper.sh"]
+          env:
+            # Loopback avoids waiting on this Pod's own Service readiness.
+            - name: VAULT_URL
+              value: http://127.0.0.1:8200
+            - name: BACKUP_INTERVAL_SECONDS
+              value: {{ .Values.vault.backupIntervalSeconds | quote }}
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          volumeMounts:
+            - name: keeper
+              mountPath: /scripts
+              readOnly: true
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: backup
+              mountPath: /backup
+      volumes:
+        - name: keeper
+          configMap:
+            name: {{ include "windx.fullname" . }}-vault-keeper
+        {{- if not .Values.vault.persistence.enabled }}
+        - name: backup
+          emptyDir: {}
+        {{- end }}
+        {{- include "windx.vaultBootstrapSecretVolume" . | nindent 8 }}
+  {{- if .Values.vault.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: backup
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- if .Values.vault.persistence.storageClassName }}
+        storageClassName: {{ .Values.vault.persistence.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.vault.persistence.size | quote }}
+  {{- end }}
+{{- end }}

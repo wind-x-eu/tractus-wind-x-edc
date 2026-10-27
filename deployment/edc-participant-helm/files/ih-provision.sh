@@ -10,18 +10,20 @@ H="X-Api-Key: $SUPERUSER_KEY"
 
 echo "ih-provision: waiting for the IdentityHub API ..."
 i=0
-until [ "$(curl -s -o /dev/null -w '%{http_code}' -H "$H" "$IH")" = "200" ]; do
+until [ "$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "$H" "$IH" || true)" = "200" ]; do
     i=$((i+1))
     [ "$i" -gt 100 ] && { echo "ERROR: IdentityHub API did not become ready"; exit 1; }
     sleep 3
 done
 
-if [ "$(curl -s -o /dev/null -w '%{http_code}' -H "$H" "$IH/$CTX")" = "200" ]; then
-    echo "ih-provision: Participant $DID already exists; leaving its key unchanged."
-    exit 0
-fi
+code=$(curl -sS --max-time 30 -o /tmp/response.json -w '%{http_code}' -H "$H" "$IH/$CTX")
+case "$code" in
+    200) echo "ih-provision: Participant $DID already exists; leaving its key unchanged."; exit 0 ;;
+    404) ;; # Create only when the API confirms the participant is absent.
+    *) echo "ih-provision: ERROR checking participant (HTTP $code)"; exit 1 ;;
+esac
 
-code=$(curl -s -o /tmp/response.json -w '%{http_code}' -X POST "$IH" \
+code=$(curl -sS --max-time 60 -o /tmp/response.json -w '%{http_code}' -X POST "$IH" \
     -H "$H" -H 'Content-Type: application/json' -d "{
   \"active\": true,
   \"did\": \"$DID\",

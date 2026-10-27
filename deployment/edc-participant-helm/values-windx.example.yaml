@@ -2,6 +2,10 @@
 # and keep values-windx.yaml out of version control if it contains local settings.
 namespace: edc-participant
 
+# Create this Secret in the installation namespace if the Wind-X images are private.
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
 participant:
   publicHost: edc.partner.example
   bpn: BPNL000000000000

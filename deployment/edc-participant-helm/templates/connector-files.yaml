@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "windx.fullname" . }}-connector-files
+  labels:
+    {{- include "windx.labels" . | nindent 4 }}
+data:
+  {{- range $file := list "start-java.sh" "wait-for-participant.sh" "log4j2.yaml" "opentelemetry-controlplane.properties" "opentelemetry-dataplane.properties" }}
+  {{ $file }}: |
+{{ $.Files.Get (printf "files/%s" $file) | replace "\r\n" "\n" | indent 4 }}
+  {{- end }}

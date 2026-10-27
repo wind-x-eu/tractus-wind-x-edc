@@ -1,9 +1,9 @@
 apiVersion: v2
 name: windx-edc-participant
-description: IdentityHub, participant onboarding, PostgreSQL, and public routing for a Wind-X EDC participant
+description: Standalone Wind-X EDC participant with connector, IdentityHub, PostgreSQL, Vault, onboarding, and public routing
 type: application
-version: 0.1.0
-appVersion: "0.3.2"
+version: 0.2.0
+appVersion: "sha-9f724fe"
 home: https://github.com/eclipse-tractusx/tractusx-edc
 sources:
   - https://github.com/eclipse-tractusx/tractusx-edc/tree/main/charts/tractusx-connector

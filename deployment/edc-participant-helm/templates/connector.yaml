@@ -1,0 +1,148 @@
+{{- range $role := list "controlplane" "dataplane" }}
+{{- $settings := index $.Values $role }}
+{{- $ports := dict "default" 8080 "control" 8084 "public" 8081 }}
+{{- if eq $role "controlplane" }}
+{{- $ports = dict "default" 8080 "management" 8081 "control" 8083 "protocol" 8084 "catalog" 8085 }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "windx.connectorName" $ }}-{{ $role }}
+  labels:
+    {{- include "windx.labels" $ | nindent 4 }}
+data:
+  {{- tpl ($.Files.Get "files/connector-env.yaml") (dict "root" $ "role" $role "Template" $.Template) | fromYaml | toYaml | nindent 2 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "windx.connectorName" $ }}-{{ $role }}
+  labels:
+    {{- include "windx.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $role }}
+spec:
+  replicas: {{ $settings.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{ $role }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+  template:
+    metadata:
+      annotations:
+        checksum/env: {{ tpl ($.Files.Get "files/connector-env.yaml") (dict "root" $ "role" $role "Template" $.Template) | sha256sum }}
+        checksum/files: {{ include (print $.Template.BasePath "/connector-files.yaml") $ | sha256sum }}
+      labels:
+        app.kubernetes.io/component: {{ $role }}
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+    spec:
+      {{- include "windx.imagePullSecrets" $ | nindent 6 }}
+      initContainers:
+        - name: wait-for-participant
+          image: {{ $.Values.identityhub.provision.image | quote }}
+          command: ["/bin/sh", "/scripts/wait-for-participant.sh"]
+          env:
+            - name: PUBLIC_HOST
+              value: {{ $.Values.participant.publicHost | quote }}
+            - name: IDENTITYHUB_API_URL
+              value: "http://{{ include "windx.identityhubHost" $ }}:8082/api/identity/v1alpha/participants"
+          volumeMounts:
+            - name: files
+              mountPath: /scripts
+              readOnly: true
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
+        {{- if eq $role "dataplane" }}
+        - name: wait-for-controlplane
+          image: {{ $.Values.identityhub.provision.image | quote }}
+          command: ["sh", "-c"]
+          args:
+            - >-
+              until curl -fsS --max-time 10
+              http://{{ include "windx.connectorName" $ }}-controlplane:8080/api/check/readiness;
+              do sleep 3; done
+        {{- end }}
+      containers:
+        - name: {{ $role }}
+          image: {{ printf "%s:%s" $settings.image.repository $settings.image.tag | quote }}
+          imagePullPolicy: {{ $settings.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/start-java.sh"]
+          args: [{{ printf "--log-level=%s" $.Values.connector.logLevel | quote }}]
+          envFrom:
+            - configMapRef:
+                name: {{ include "windx.connectorName" $ }}-{{ $role }}
+          env:
+            - name: ROLE
+              value: {{ $role }}
+            {{- with $settings.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- range $name, $port := $ports }}
+            - name: {{ $name }}
+              containerPort: {{ $port }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /api/check/liveness
+              port: default
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/check/readiness
+              port: default
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/check/liveness
+              port: default
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml $settings.resources | nindent 12 }}
+          volumeMounts:
+            - name: files
+              mountPath: /scripts
+              readOnly: true
+            - name: files
+              mountPath: /app/log4j2.yaml
+              subPath: log4j2.yaml
+              readOnly: true
+            - name: files
+              mountPath: /app/opentelemetry.properties
+              subPath: opentelemetry-{{ $role }}.properties
+              readOnly: true
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: files
+          configMap:
+            name: {{ include "windx.fullname" $ }}-connector-files
+        - name: tmp
+          emptyDir: {}
+        {{- include "windx.connectorSecretVolume" $ | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "windx.connectorName" $ }}-{{ $role }}
+  labels:
+    {{- include "windx.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $role }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: {{ $role }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+  ports:
+    {{- range $name, $port := $ports }}
+    - name: {{ $name }}
+      port: {{ $port }}
+      targetPort: {{ $name }}
+    {{- end }}
+{{- end }}

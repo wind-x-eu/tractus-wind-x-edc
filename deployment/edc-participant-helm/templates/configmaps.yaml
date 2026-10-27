@@ -18,13 +18,15 @@ metadata:
     {{- include "windx.labels" . | nindent 4 }}
 data:
   start-java.sh: |
-{{ .Files.Get "files/start-java.sh" | indent 4 }}
+{{ .Files.Get "files/start-java.sh" | replace "\r\n" "\n" | indent 4 }}
   ih-provision.sh: |
-{{ .Files.Get "files/ih-provision.sh" | indent 4 }}
+{{ .Files.Get "files/ih-provision.sh" | replace "\r\n" "\n" | indent 4 }}
+  wait-for-vault.sh: |
+{{ .Files.Get "files/wait-for-vault.sh" | replace "\r\n" "\n" | indent 4 }}
   logging.properties: |
 {{ .Files.Get "files/ih-logging.properties" | indent 4 }}
   identityhub.properties: |
-    edc.vault.hashicorp.url={{ .Values.vault.url }}
+    edc.vault.hashicorp.url={{ (include "windx.vaultUrl" .) }}
     edc.vault.hashicorp.timeout.seconds=30
     edc.vault.hashicorp.health.check.enabled=true
     edc.vault.hashicorp.health.check.standby.ok=true
@@ -55,6 +57,6 @@ data:
     edc.encryption.strict=false
 {{ range $store := list "participantcontext" "keypair" "didresource" "stsclient" "credentialrequest" "credentials" "jti" "participantcontextconfig" }}
     edc.sql.store.{{ $store }}.datasource={{ $store }}
-    edc.datasource.{{ $store }}.url=jdbc:postgresql://{{ $.Values.postgresql.host }}:{{ $.Values.postgresql.port }}/{{ $.Values.postgresql.identityHubDatabase }}
+    edc.datasource.{{ $store }}.url=jdbc:postgresql://{{ include "windx.postgresqlHost" $ }}:{{ $.Values.postgresql.port }}/{{ $.Values.postgresql.identityHubDatabase }}
     edc.datasource.{{ $store }}.user={{ $.Values.postgresql.username }}
 {{ end }}

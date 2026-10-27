@@ -1,10 +1,16 @@
-Wind-X participant resources have been submitted.
+Wind-X participant (Control Plane, Data Plane, IdentityHub, PostgreSQL, Vault).
 
 Public DID document:
   https://{{ .Values.participant.publicHost }}/.well-known/did.json
 
-The connector release is installed by Helmfile after IdentityHub provisioning succeeds.
-Check the releases with:
-  helm list --namespace {{ .Release.Namespace }}
+Inspect provisioning:
+  kubectl logs -n {{ .Release.Namespace }} job/{{ include "windx.fullname" . }}-identityhub-provision-{{ .Release.Revision }}
 
-The connector management API is not exposed by the public ingress.
+Access the private management API:
+  kubectl port-forward -n {{ .Release.Namespace }} service/{{ include "windx.connectorName" . }}-controlplane 18081:8081
+
+Use the {{ .Values.secrets.keys.managementKey }} entry in Secret {{ include "windx.secretName" . }} as X-Api-Key.
+Back up that Secret, both PostgreSQL databases, and the Vault backup PVC together.
+{{- if .Values.vault.enabled }}
+Bundled Vault follows Compose: dev mode with a PVC backup every {{ .Values.vault.backupIntervalSeconds }} seconds.
+{{- end }}

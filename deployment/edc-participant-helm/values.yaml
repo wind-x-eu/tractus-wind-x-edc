@@ -1,4 +1,7 @@
 namespace: edc-participant
+fullnameOverride: ""
+# Applied to every Pod, including bootstrap/provisioning Jobs.
+imagePullSecrets: []
 
 participant:
   # This hostname becomes did:web:<publicHost>. Keep it stable for the life of the participant.
@@ -9,7 +12,9 @@ participant:
   mediatorBaseUrl: http://semanticmediator:3051
 
 secrets:
-  name: edc-participant-secrets
+  # Generate once and reuse on upgrades. Set false for an externally managed Secret.
+  create: true
+  name: ""
   keys:
     postgresPassword: postgres-password
     vaultToken: vault-token
@@ -22,8 +27,10 @@ postgresql:
   # create both databases and grant the configured user access before installation.
   enabled: true
   image: postgres:16.4-alpine
-  serviceName: postgres
-  host: postgres
+  # Empty names derive from the Helm release, allowing multiple participants per namespace.
+  serviceName: ""
+  # Used only when enabled=false.
+  host: ""
   port: 5432
   username: edc
   defaultDatabase: edc
@@ -41,9 +48,25 @@ postgresql:
       memory: 1Gi
 
 vault:
-  # Point this at a persistent, initialized Vault with a KV v2 mount named `secret`.
-  # The token in secrets.name must be scoped to this participant's secret paths.
-  url: http://vault:8200
+  # Compose-compatible dev Vault + persistent backup keeper. For an existing,
+  # initialized KV v2 Vault, disable this and set url and secrets.create=false.
+  enabled: true
+  image: hashicorp/vault:1.17
+  url: ""
+  serviceName: ""
+  keeperImage: curlimages/curl:8.10.1
+  backupIntervalSeconds: 30
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
   kvV2DataPath: secret/data
   secretApiPath: /v1/secret
   healthApiPath: /v1/sys/health
@@ -57,7 +80,7 @@ identityhub:
     tag: 0.3.2
     pullPolicy: IfNotPresent
   replicaCount: 1
-  serviceName: identityhub
+  serviceName: ""
   logInitImage: busybox:1.36.1
   provision:
     enabled: true
@@ -71,9 +94,40 @@ identityhub:
       memory: 2Gi
 
 connector:
-  releaseName: windx-connector
-  fullnameOverride: windx-connector
-  imagePullSecret: ghcr-pull-secret
+  fullnameOverride: ""
+  # Optional existing registry Secret; alternatively use imagePullSecrets above.
+  imagePullSecret: ""
+  logLevel: INFO
+
+controlplane:
+  image:
+    repository: ghcr.io/wind-x-eu/edc-controlplane-postgresql-hashicorp-vault
+    tag: sha-9f724fe
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  extraEnv: []
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+dataplane:
+  image:
+    repository: ghcr.io/wind-x-eu/edc-dataplane-windx
+    tag: sha-9f724fe
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  extraEnv: []
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
 
 ingress:
   enabled: false

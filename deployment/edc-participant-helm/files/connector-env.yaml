@@ -1,0 +1,62 @@
+# Compose runtime configuration, with release-local Kubernetes service addresses.
+EDC_VAULT_HASHICORP_URL: {{ include "windx.vaultUrl" .root | quote }}
+EDC_VAULT_HASHICORP_TIMEOUT_SECONDS: "30"
+EDC_VAULT_HASHICORP_HEALTH_CHECK_ENABLED: "true"
+EDC_VAULT_HASHICORP_HEALTH_CHECK_STANDBY_OK: "true"
+EDC_VAULT_HASHICORP_API_SECRET_PATH: {{ .root.Values.vault.secretApiPath | quote }}
+EDC_VAULT_HASHICORP_API_HEALTH_CHECK_PATH: {{ .root.Values.vault.healthApiPath | quote }}
+EDC_DATASOURCE_DEFAULT_USER: {{ .root.Values.postgresql.username | quote }}
+EDC_DATASOURCE_DEFAULT_URL: {{ printf "jdbc:postgresql://%s:%v/%s" (include "windx.postgresqlHost" .root) .root.Values.postgresql.port .root.Values.postgresql.defaultDatabase | quote }}
+EDC_IAM_STS_OAUTH_TOKEN_URL: {{ printf "http://%s:8087/api/sts/token" (include "windx.identityhubHost" .root) | quote }}
+EDC_IAM_STS_OAUTH_CLIENT_ID: "did:web:{{ .root.Values.participant.publicHost }}"
+EDC_IAM_STS_OAUTH_CLIENT_SECRET_ALIAS: "did:web:{{ .root.Values.participant.publicHost }}-sts-client-secret"
+EDC_PARTICIPANT_CONTEXT_ID: "did:web:{{ .root.Values.participant.publicHost }}"
+EDC_IAM_ISSUER_ID: "did:web:{{ .root.Values.participant.publicHost }}"
+LOG4J_CONFIGURATION_FILE: /app/log4j2.yaml
+WEB_HTTP_PORT: "8080"
+WEB_HTTP_PATH: /api
+EDC_RUNTIME_ID: {{ .role | quote }}
+EDC_IAM_DID_WEB_USE_HTTPS: "true"
+{{ if eq .role "controlplane" }}
+EDC_PARTICIPANT_ID: "did:web:{{ .root.Values.participant.publicHost }}"
+TRACTUSX_EDC_PARTICIPANT_BPN: {{ .root.Values.participant.bpn | quote }}
+WEB_HTTP_MANAGEMENT_AUTH_TYPE: tokenbased
+WEB_HTTP_MANAGEMENT_PORT: "8081"
+WEB_HTTP_MANAGEMENT_PATH: /management
+WEB_HTTP_CONTROL_PORT: "8083"
+WEB_HTTP_CONTROL_PATH: /control
+WEB_HTTP_PROTOCOL_PORT: "8084"
+WEB_HTTP_PROTOCOL_PATH: /api/v1/dsp
+EDC_CONTROL_ENDPOINT: "http://{{ include "windx.connectorName" .root }}-controlplane:8083/control"
+WEB_HTTP_CATALOG_PORT: "8085"
+WEB_HTTP_CATALOG_PATH: /catalog
+WEB_HTTP_CATALOG_AUTH_TYPE: tokenbased
+EDC_DSP_CALLBACK_ADDRESS: "https://{{ .root.Values.participant.publicHost }}/api/v1/dsp"
+EDC_OAUTH_PROVIDER_AUDIENCE: idsc:IDS_CONNECTORS_ALL
+EDC_OAUTH_ENDPOINT_AUDIENCE: "https://{{ .root.Values.participant.publicHost }}/api/v1/dsp"
+EDC_IAM_TRUSTED-ISSUER_0-ISSUER_ID: {{ .root.Values.participant.operatorDid | quote }}
+EDC_IAM_TRUSTED-ISSUER_0-ISSUER_SUPPORTEDTYPES: '["MembershipCredential","BpnCredential","DataExchangeGovernanceCredential"]'
+TX_EDC_DID_SERVICE_SELF_REGISTRATION_ENABLED: "false"
+TX_EDC_DID_SERVICE_SELF_DEREGISTRATION_ENABLED: "true"
+TX_EDC_DCP_CACHE_ENABLED: "true"
+TX_EDC_DCP_CACHE_VALIDITY_SECONDS: "86400"
+TX_EDC_IAM_IATP_BDRS_SERVER_URL: {{ .root.Values.participant.bdrsUrl | quote }}
+TX_EDC_IAM_IATP_BDRS_CACHE_VALIDITY: "600"
+EDC_CATALOG_CACHE_EXECUTION_ENABLED: "false"
+EDC_POLICY_VALIDATION_ENABLED: "true"
+{{ else }}
+EDC_PARTICIPANT_ID: {{ .root.Values.participant.bpn | quote }}
+WEB_HTTP_CONTROL_PORT: "8084"
+WEB_HTTP_CONTROL_PATH: /api/control
+WEB_HTTP_PUBLIC_PORT: "8081"
+WEB_HTTP_PUBLIC_PATH: /api/public
+EDC_CONTROL_ENDPOINT: "http://{{ include "windx.connectorName" .root }}-dataplane:8084/api/control"
+EDC_DPF_SELECTOR_URL: "http://{{ include "windx.connectorName" .root }}-controlplane:8083/control/v1/dataplanes"
+EDC_DATAPLANE_API_PUBLIC_BASEURL: "https://{{ .root.Values.participant.publicHost }}/api/public"
+TX_EDC_DATAPLANE_TOKEN_EXPIRY: "300"
+TX_EDC_DATAPLANE_TOKEN_EXPIRY_TOLERANCE: "10"
+TX_EDC_DATAPLANE_TOKEN_REFRESH_ENDPOINT: "https://{{ .root.Values.participant.publicHost }}/api/public/token"
+EDC_TRANSFER_PROXY_TOKEN_SIGNER_PRIVATEKEY_ALIAS: "did:web:{{ .root.Values.participant.publicHost }}#signing-key-1"
+EDC_TRANSFER_PROXY_TOKEN_VERIFIER_PUBLICKEY_ALIAS: "did:web:{{ .root.Values.participant.publicHost }}#signing-key-1"
+TX_EDC_WINDX_MEDIATOR_BASE_URL: {{ .root.Values.participant.mediatorBaseUrl | quote }}
+{{ end }}

@@ -13,10 +13,13 @@ spec:
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/component: identityhub
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- include "windx.imagePullSecrets" . | nindent 6 }}
       initContainers:
         - name: prepare-logs
           image: {{ .Values.identityhub.logInitImage | quote }}
@@ -30,22 +33,26 @@ spec:
             - sh
             - -c
             - >-
-              until pg_isready -h {{ .Values.postgresql.host | quote }}
+              until pg_isready -h {{ (include "windx.postgresqlHost" .) | quote }}
               -p {{ .Values.postgresql.port }} -U {{ .Values.postgresql.username | quote }}
               -d {{ .Values.postgresql.identityHubDatabase | quote }}; do
                 echo 'waiting for PostgreSQL'; sleep 3;
               done
-        - name: wait-for-vault
+        - name: wait-for-superuser-alias
           image: {{ .Values.vault.bootstrap.image | quote }}
-          command:
-            - sh
-            - -c
-            - >-
-              until code=$(curl -sS -o /dev/null -w '%{http_code}'
-              {{ printf "%s%s" (trimSuffix "/" .Values.vault.url) .Values.vault.healthApiPath | quote }});
-              [ "$code" = 200 ] || [ "$code" = 429 ]; do
-                echo 'waiting for Vault'; sleep 3;
-              done
+          command: ["/bin/sh", "/scripts/wait-for-vault.sh"]
+          env:
+            - name: VAULT_URL
+              value: {{ include "windx.vaultUrl" . | quote }}
+            - name: VAULT_KV_V2_DATA_PATH
+              value: {{ .Values.vault.kvV2DataPath | quote }}
+          volumeMounts:
+            - name: scripts-and-logging
+              mountPath: /scripts
+              readOnly: true
+            - name: participant-secrets
+              mountPath: /secrets
+              readOnly: true
       containers:
         - name: identityhub
           image: {{ printf "%s:%s" .Values.identityhub.image.repository .Values.identityhub.image.tag | quote }}
@@ -121,6 +128,8 @@ spec:
                 path: ih-provision.sh
               - key: logging.properties
                 path: logging.properties
+              - key: wait-for-vault.sh
+                path: wait-for-vault.sh
         - name: logs
           emptyDir: {}
         {{- include "windx.identityhubSecretVolume" . | nindent 8 }}
@@ -128,7 +137,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Values.identityhub.serviceName }}
+  name: {{ (include "windx.identityhubHost" .) }}
   labels:
     {{- include "windx.labels" . | nindent 4 }}
     app.kubernetes.io/component: identityhub

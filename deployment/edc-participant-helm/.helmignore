@@ -1,7 +1,8 @@
 .gitignore
+.gitattributes
 .helmignore
 helmfile.yaml
 values-windx.yaml
-values-windx.example.yaml
-values-connector.yaml.gotmpl
 secrets/
+tests/
+*.tgz

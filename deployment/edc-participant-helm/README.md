@@ -1,55 +1,121 @@
-# Wind-X EDC participant on Kubernetes
+# Standalone Wind-X EDC participant
 
-This package deploys the IdentityHub and its persistent PostgreSQL database, bootstraps the IdentityHub API key into Vault, provisions the participant DID, and exposes the same four public paths as the Compose setup. Helmfile installs this chart first and the repository's `tractusx-connector` chart second, so the connector starts after IdentityHub provisioning finishes.
+Copy this entire directory into another repository, or distribute it with `helm package .`. It is a complete application chart: no sibling chart, remote chart dependencies, Helmfile, Gradle build, or source checkout is required to install it. All templates, startup/provisioning scripts, logging configuration, and OpenTelemetry settings are included here.
 
-The chart expects a **persistent, initialized HashiCorp Vault**. It does not run Vault in development mode. By default, Vault must have a KV v2 mount named `secret`, and the token supplied to the workloads must be able to read and write the participant's entries under `secret/data/*` (and list metadata if required by the Vault policy). The bootstrap Job writes the stable IdentityHub superuser key to the alias `sup3r$3cr3t`. If the mount path differs, update `vault.kvV2DataPath` and `vault.secretApiPath` together. If an administrator already bootstraps this alias, set `vault.bootstrap.enabled: false`.
+The default stack matches `edc-participant-compose`:
 
-## Prepare values and secrets
-
-Copy `values-windx.example.yaml` to `values-windx.yaml` (PowerShell: `Copy-Item values-windx.example.yaml values-windx.yaml`). Set the participant's stable public hostname and BPN, then confirm the operator DID, BDRS endpoint, mediator URL, namespace, ingress class, and TLS Secret name. The hostname is used for `did:web`, the DID document, the callback URLs, and ingress routing, so keep it unchanged after onboarding.
-
-Create the Kubernetes Secret named by `secrets.name` (default `edc-participant-secrets`) in the target namespace before installing. It must contain these keys:
-
-| Secret key | Used for |
+| Component | Kubernetes implementation |
 |---|---|
-| `postgres-password` | PostgreSQL `edc` user password, shared by the connector and IdentityHub |
-| `vault-token` | Vault KV v2 access for IdentityHub, connector, and the bootstrap Job |
-| `superuser-key` | IdentityHub API key; use the Compose format `c3VwZXItdXNlcg==.<random>` |
-| `management-key` | Connector management and internal Data Plane proxy authentication |
+| Credentials | A generated Kubernetes Secret, reused on upgrades |
+| PostgreSQL | Single-replica StatefulSet with a PVC and the `edc` and `ih` databases |
+| Vault and vault-keeper | Dev Vault and backup sidecar in a StatefulSet; KV entries restored from a PVC on restart and backed up every 30 seconds |
+| IdentityHub | `tractusx/identityhub:0.3.2`, DID document, credential API, and STS |
+| Participant provisioning | Idempotent Job; an existing participant keeps its signing key |
+| Control Plane and Data Plane | Wind-X images pinned to `sha-9f724fe`, with Compose runtime settings |
+| Public routing | Optional Ingress exposing the same four paths as the Compose Caddy proxy |
 
-Use a secret manager or create this Secret from protected local files. Do not commit the Secret manifest, its source files, or credentials in a values file. If the Secret name or key names differ, update the `secrets` section in `values.yaml` and copy those settings into your site values file.
+The chart contains focused connector templates adapted from the Tractus-X connector configuration and the Compose deployment. It does not expose the full upstream connector chart's values API. Connector images, resources, replica counts, log level, registry credentials, and additional environment variables are configured in this chart's `values.yaml`.
 
-For a fresh deployment, this chart can create a single-replica PostgreSQL instance with a PVC. It initializes `edc` and `ih` on the first start. For an existing or managed PostgreSQL service, set `postgresql.enabled: false`, set `postgresql.host` and `postgresql.port`, and create both databases with `edc` as their owner before installing. The PostgreSQL init script only runs when the data directory is empty.
+## Install on a cluster
 
-The connector images in `values-connector.yaml.gotmpl` use the Compose tag `sha-9f724fe`. Create the GHCR pull Secret named by `connector.imagePullSecret` (default `ghcr-pull-secret`) in the same namespace. Create the ingress TLS Secret before installation when ingress TLS is enabled.
+Use Helm 3 or 4 and a Kubernetes cluster supporting `apps/v1`, `batch/v1`, and `networking.k8s.io/v1`. The cluster needs enough capacity for the configured resources, registry access for the selected images, and persistent volume provisioning. Set both `postgresql.persistence.storageClassName` and `vault.persistence.storageClassName` if there is no default StorageClass. The bundled containers require Linux nodes compatible with the selected images. Cluster admission policies must permit the images' users; the log-directory init container and Vault backup keeper use root to prepare their writable volumes.
 
-## Install
+For public data-space traffic, configure DNS for a stable hostname, an ingress controller, and a TLS Secret in the installation namespace. Caddy and automatic certificate issuance are replaced by your cluster's ingress/TLS facilities. Only `/.well-known/did.json`, `/api/credentials`, `/api/v1/dsp`, and `/api/public` are routed publicly. The management API stays on a ClusterIP Service.
 
-Install Helmfile and Helm, then run these commands from this directory after creating `values-windx.yaml` and the Kubernetes Secrets:
-
-```shell
-helmfile deps
-helmfile sync
-```
-
-Helmfile waits for the participant release, including its post-install provisioning Job, before installing the connector. The Job checks for an existing participant before creating keys, so repeat upgrades leave an existing IdentityHub key unchanged.
-
-The successful provisioning Job remains available for one hour for inspection:
+From this directory:
 
 ```shell
-kubectl logs --namespace edc-participant job/windx-participant-identityhub-provision
+cp values-windx.example.yaml values-windx.yaml
+kubectl create namespace edc-participant
 ```
 
-The ingress routes only `/.well-known/did.json`, `/api/credentials`, `/api/v1/dsp`, and `/api/public`. It leaves the Control Plane management port private. The default NGINX annotations disable proxy buffering for streaming data responses; adjust them for the ingress controller in use.
+On PowerShell, use `Copy-Item values-windx.example.yaml values-windx.yaml`. Fill in `participant.publicHost`, the assigned `participant.bpn`, and the ingress class/TLS Secret in the copied file. Confirm the operator DID, BDRS URL, and mediator URL. The mediator is an external endpoint, as in Compose; this chart does not deploy one.
 
-After the DID document responds at `https://<publicHost>/.well-known/did.json`, complete the existing SWMS onboarding: register the BPN and DID, then request `MembershipCredential`, `BpnCredential`, and `DataExchangeGovernanceCredential` for the participant.
+The example names a registry Secret `ghcr-pull-secret`. Create it in the target namespace using your registry credential manager if the Wind-X images are private. Remove `imagePullSecrets` from the example if your selected images are public. Create the TLS Secret or arrange for your certificate controller to create it before enabling ingress.
 
-## Migrating from Compose
+```shell
+helm upgrade --install windx-participant . \
+  --namespace edc-participant --create-namespace \
+  --values values-windx.yaml \
+  --wait --wait-for-jobs --timeout 15m
+```
 
-For an existing participant, restore both PostgreSQL databases (`edc` and `ih`) and the Vault KV entries before installing. Keep the same `publicHost`, PostgreSQL password, IdentityHub superuser key, and management key. If moving to a different Vault, issue a stable workload token for the restored KV paths and put that token in `vault-token`. A fresh database or Vault with the same DID can generate a new signing key, so do not run provisioning against empty state and treat it as the old participant. Back up the database, Vault storage, and Kubernetes Secret together.
+In PowerShell, run the command on one line or use backticks for continuation. `--namespace` determines where resources are installed; the `namespace` value is only used by the optional Helmfile wrapper. Helmfile users can still run `helmfile sync` after creating `values-windx.yaml`; it installs this single chart.
 
-The Compose README records the identity state and hostname constraints in more detail: [`deployment/edc-participant-compose/README.md`](../edc-participant-compose/README.md).
+No manual workload credentials are needed for a fresh installation. Helm generates four random values and reuses the existing Secret through `lookup` on upgrades. The IdentityHub key has the Compose format `c3VwZXItdXNlcg==.<random>`. The Secret is retained on uninstall, and StatefulSet PVCs are retained by Kubernetes. Do not delete or change these credentials independently of the participant's databases and Vault state. Offline `helm template` cannot look up existing credentials and generates fresh values; use normal Helm installation/upgrades for existing participants, or manage the Secret externally with `secrets.create: false` for GitOps/offline rendering.
 
-## Compatibility notes
+Startup ordering is handled inside the release: PostgreSQL initializes both databases; Vault restores its backup and superuser alias; IdentityHub waits for that alias; the provisioning Job creates the participant only if absent; the Control Plane waits for the participant; the Data Plane also waits for the Control Plane. Provisioning and optional external-Vault bootstrap Jobs have revision-specific names and are removed one hour after completion. They run as ordinary resources so `helm --wait` does not deadlock on post-install hooks.
 
-The Compose setup cites connector chart `0.12.1`; the local chart in this repository is `0.13.1-SNAPSHOT`. This package uses the local chart and carries its Wind-X image values explicitly. The local chart has small compatibility additions for Secret references, the Wind-X IATP BDRS variable names, and the Data Plane participant ID. Review and pin these chart and image versions together when updating the participant stack.
+```shell
+kubectl get pods,jobs,pvc --namespace edc-participant
+kubectl logs --namespace edc-participant job/windx-participant-identityhub-provision-1
+kubectl port-forward --namespace edc-participant service/windx-participant-controlplane 18081:8081
+```
+
+The provisioning Job suffix is the Helm release revision. Use `X-Api-Key` for management requests to `http://127.0.0.1:18081/management`. Retrieve the key securely from the `management-key` entry of Secret `windx-participant-secrets`, for example in a POSIX shell:
+
+```shell
+kubectl get secret windx-participant-secrets -n edc-participant \
+  -o jsonpath='{.data.management-key}' | base64 --decode
+```
+
+After `https://<publicHost>/.well-known/did.json` responds, register the BPN and DID with SWMS and request all three credentials: `MembershipCredential`, `BpnCredential`, and `DataExchangeGovernanceCredential`. Keep the hostname unchanged for the lifetime of the identity.
+
+## External services and credentials
+
+The bundled Vault deliberately follows Compose's dev-mode plus backup behavior. Its backup is a periodic KV snapshot, not a durable Vault storage backend: abrupt failure can lose changes since the last backup. HashiCorp describes [dev mode](https://developer.hashicorp.com/vault/docs/concepts/dev-server) as a development facility. For a persistent managed Vault, disable the bundled Vault. The external Vault must be initialized, unsealed, and have a KV v2 mount; its workload token must read/write the participant's entries. The optional bootstrap Job writes the stable IdentityHub superuser key to `sup3r$3cr3t`. Disable bootstrap only if that alias is already managed elsewhere.
+
+Example overrides:
+
+```yaml
+secrets:
+  create: false
+  name: edc-participant-secrets
+postgresql:
+  enabled: false
+  host: postgres.database.example
+  port: 5432
+  username: edc
+vault:
+  enabled: false
+  url: https://vault.example
+  kvV2DataPath: secret/data
+  secretApiPath: /v1/secret
+  bootstrap:
+    enabled: true
+```
+
+Create the databases `edc` and `ih` with the configured PostgreSQL user as their owner before installing against an external database. The init script for bundled PostgreSQL only runs with an empty data directory. `postgresql.port` is the server's port; keep it at 5432 with bundled PostgreSQL.
+
+The externally managed Secret must contain these keys (override their names under `secrets.keys` if needed):
+
+| Key | Purpose |
+|---|---|
+| `postgres-password` | Shared PostgreSQL password for connector and IdentityHub |
+| `vault-token` | Vault access token |
+| `superuser-key` | Stable IdentityHub API key, in the format above |
+| `management-key` | Connector management/catalog and Data Plane proxy authentication |
+
+Secrets are mounted as files and passed to Java via a private temporary configuration file, matching Compose. No cluster-wide resources or RBAC grants are required by the workloads. Image pull Secrets apply to all Pods. Resource names derive from the Helm release unless explicitly overridden, allowing multiple participants in one namespace.
+
+## Packaging and moving
+
+```shell
+helm lint .
+helm package . --destination /path/to/output
+helm upgrade --install windx-participant /path/to/output/windx-edc-participant-0.2.0.tgz \
+  --namespace edc-participant --create-namespace --values /path/to/values-windx.yaml \
+  --wait --wait-for-jobs --timeout 15m
+```
+
+Local `values-windx.yaml`, the `secrets/` directory, and test files are excluded from the package. The example values are included. No `helm dependency build` is needed. Moving the chart moves the deployment definition; moving an existing participant also requires its identity state and access to its configured external endpoints.
+
+## Migrating existing participants
+
+Restore both PostgreSQL databases and Vault KV entries before starting an existing participant elsewhere. Preserve its public hostname, BPN, signing keys, STS client secret, PostgreSQL password, IdentityHub superuser key, and management key. Restore the Kubernetes Secret too, or use `secrets.create: false` and supply the original keys. For a new Vault, issue a workload token for the restored entries. Back up the databases, Vault backup volume (or external Vault storage), and Kubernetes Secret together. Empty databases/Vault create a new identity even with the same DID.
+
+The previous Helmfile installed separate `windx-participant` and `windx-connector` releases and used an external Vault. This version combines them and changes default service/Secret names. It is not an in-place ownership transfer of those two releases: plan a state-preserving migration with a maintenance window or restore into a separate namespace, and remove the previous connector release only after preserving its state. Use the external-service overrides above for existing Vault/Secret installations; explicit `postgresql.serviceName`, `identityhub.serviceName`, and `connector.fullnameOverride` values can preserve internal addresses. Do not install overlapping resources owned by the old connector release.
+
+## Verification
+
+Run `node tests/verify.mjs` from this directory (requires Node.js, Helm, and kubectl). It renders a matrix of bundled/external services, checks resource wiring and public routes, packages the chart in an isolated temporary directory, and renders the package. Add `--compose ../edc-participant-compose` to compare every connector runtime variable with Compose (also requires the Docker Compose CLI, but no Docker daemon). These checks do not contact a cluster. An actual cluster deployment and public TLS/data-space traffic still need validation in your target environment.

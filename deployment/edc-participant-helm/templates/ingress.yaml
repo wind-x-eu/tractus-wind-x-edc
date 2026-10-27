@@ -27,28 +27,28 @@ spec:
             pathType: Exact
             backend:
               service:
-                name: {{ .Values.identityhub.serviceName }}
+                name: {{ (include "windx.identityhubHost" .) }}
                 port:
                   number: 8084
           - path: /api/credentials
             pathType: Prefix
             backend:
               service:
-                name: {{ .Values.identityhub.serviceName }}
+                name: {{ (include "windx.identityhubHost" .) }}
                 port:
                   number: 8083
           - path: /api/v1/dsp
             pathType: Prefix
             backend:
               service:
-                name: {{ printf "%s-controlplane" .Values.connector.fullnameOverride }}
+                name: {{ include "windx.connectorName" . }}-controlplane
                 port:
                   number: 8084
           - path: /api/public
             pathType: Prefix
             backend:
               service:
-                name: {{ printf "%s-dataplane" .Values.connector.fullnameOverride }}
+                name: {{ include "windx.connectorName" . }}-dataplane
                 port:
                   number: 8081
 {{- end }}

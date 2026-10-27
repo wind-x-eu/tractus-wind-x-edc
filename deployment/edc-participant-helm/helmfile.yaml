@@ -16,11 +16,3 @@ releases:
     values:
       - values.yaml
       - values-windx.yaml
-
-  - name: {{ .Values.connector.releaseName | quote }}
-    namespace: {{ .Values.namespace | quote }}
-    chart: ../../charts/tractusx-connector
-    needs:
-      - {{ printf "%s/windx-participant" .Values.namespace | quote }}
-    values:
-      - values-connector.yaml.gotmpl

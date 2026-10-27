@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Values.postgresql.serviceName }}
+  name: {{ (include "windx.postgresqlHost" .) }}
   labels:
     {{- include "windx.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgresql
@@ -24,7 +24,7 @@ metadata:
     {{- include "windx.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgresql
 spec:
-  serviceName: {{ .Values.postgresql.serviceName }}
+  serviceName: {{ (include "windx.postgresqlHost" .) }}
   replicas: 1
   selector:
     matchLabels:
@@ -36,6 +36,7 @@ spec:
         app.kubernetes.io/component: postgresql
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- include "windx.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: postgresql
           image: {{ .Values.postgresql.image | quote }}
